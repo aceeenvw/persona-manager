@@ -1,0 +1,202 @@
+<div id="pm_modal" class="pm_modal pm_hidden" data-build="">
+    <div class="pm_backdrop" data-pm-action="close"></div>
+    <div class="pm_panel">
+        <div class="pm_header">
+            <div class="pm_header_copy">
+                <h2 data-i18n="app.title">⊹ Persona Manager ⊹</h2>
+                <p data-i18n="app.subtitle">Browse, organize and edit your personas.</p>
+            </div>
+            <div class="pm_header_actions">
+                <button id="pm_backup" type="button" class="menu_button menu_button_icon interactable" title="Backup personas" data-i18n-title="backup.export" aria-label="Backup personas" data-i18n-aria-label="backup.export">
+                    <i class="fa-solid fa-download"></i>
+                </button>
+                <button id="pm_restore" type="button" class="menu_button menu_button_icon interactable" title="Restore personas" data-i18n-title="backup.import" aria-label="Restore personas" data-i18n-aria-label="backup.import">
+                    <i class="fa-solid fa-upload"></i>
+                </button>
+                <input id="pm_restore_input" type="file" accept=".zip,application/zip" hidden />
+                <button id="pm_close" type="button" class="menu_button menu_button_icon interactable" data-pm-action="close" title="Close" data-i18n-title="action.close">
+                    <i class="fa-solid fa-xmark"></i>
+                    <span data-i18n="action.close">Close</span>
+                </button>
+            </div>
+        </div>
+
+        <div id="pm_spotlight" class="pm_spotlight"></div>
+
+        <div class="pm_toolbar">
+            <button id="pm_sidebar_toggle" type="button" class="pm_sidebar_toggle" aria-label="Toggle folders">
+                <i class="fa-solid fa-folder-tree" aria-hidden="true"></i>
+            </button>
+            <div class="pm_search_wrap">
+                <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                <input id="pm_search" type="search" class="text_pole textarea_compact" placeholder="Search..." data-i18n-placeholder="toolbar.search" />
+            </div>
+            <select id="pm_sort" class="text_pole textarea_compact">
+                <option value="az" data-i18n="sort.az">Name A-Z</option>
+                <option value="za" data-i18n="sort.za">Name Z-A</option>
+                <option value="newest" data-i18n="sort.newest">Newest first</option>
+                <option value="oldest" data-i18n="sort.oldest">Oldest first</option>
+            </select>
+            <button id="pm_new_folder" type="button" class="menu_button menu_button_icon interactable" title="New folder" data-i18n-title="folder.new">
+                <i class="fa-solid fa-folder-plus"></i>
+            </button>
+            <button id="pm_select_toggle" type="button" class="menu_button menu_button_icon interactable" title="Select" data-i18n-title="select.toggle">
+                <i class="fa-solid fa-square-check"></i>
+            </button>
+        </div>
+
+        <div id="pm_select_bar" class="pm_select_bar pm_hidden">
+            <span id="pm_select_count" class="pm_select_count">0 selected</span>
+            <button id="pm_select_all" type="button" class="menu_button menu_button_icon interactable" title="Select all" data-i18n-title="select.all">
+                <i class="fa-solid fa-check-double"></i>
+                <span data-i18n="select.all">Select all</span>
+            </button>
+            <button id="pm_select_cancel" type="button" class="menu_button menu_button_icon interactable" title="Cancel" data-i18n-title="select.cancel">
+                <i class="fa-solid fa-xmark"></i>
+                <span data-i18n="select.cancel">Cancel</span>
+            </button>
+            <button id="pm_bulk_move" type="button" class="menu_button menu_button_icon interactable" title="Move to folder" data-i18n-title="select.move">
+                <i class="fa-solid fa-folder-open"></i>
+                <span data-i18n="select.move">Move</span>
+            </button>
+            <button id="pm_bulk_fav" type="button" class="menu_button menu_button_icon interactable" title="Toggle favorite" data-i18n-title="select.favorite">
+                <i class="fa-solid fa-star"></i>
+                <span data-i18n="select.favorite">Favorite</span>
+            </button>
+            <button id="pm_bulk_delete" type="button" class="menu_button menu_button_icon interactable pm_btn_danger" title="Delete" data-i18n-title="select.delete">
+                <i class="fa-solid fa-trash-can"></i>
+                <span data-i18n="select.delete">Delete</span>
+            </button>
+        </div>
+
+        <div id="pm_content" class="pm_content">
+            <aside id="pm_sidebar" class="pm_sidebar is-collapsed"></aside>
+            <section class="pm_main">
+                <div id="pm_grid" class="pm_grid"></div>
+                <div id="pm_empty" class="pm_status pm_hidden"></div>
+                <div id="pm_pager" class="pm_pager pm_hidden">
+                    <button id="pm_pager_prev" type="button" class="menu_button menu_button_icon interactable" aria-label="Previous page" data-i18n-aria-label="pager.prev">
+                        <i class="fa-solid fa-chevron-left"></i>
+                    </button>
+                    <span id="pm_pager_label" class="pm_pager_label">1 / 1</span>
+                    <button id="pm_pager_next" type="button" class="menu_button menu_button_icon interactable" aria-label="Next page" data-i18n-aria-label="pager.next">
+                        <i class="fa-solid fa-chevron-right"></i>
+                    </button>
+                    <span id="pm_pager_range" class="pm_pager_range"></span>
+                </div>
+            </section>
+
+            <aside id="pm_editor" class="pm_editor pm_hidden" aria-label="Persona editor">
+                <div class="pm_editor_head">
+                    <button id="pm_editor_back" type="button" class="pm_editor_back" aria-label="Back" data-i18n-aria-label="editor.back">
+                        <i class="fa-solid fa-chevron-left"></i>
+                    </button>
+                    <div class="pm_editor_id">
+                        <div class="pm_editor_avatar"><img id="pm_editor_img" src="" alt="" /></div>
+                        <div class="pm_editor_titleblock">
+                            <span id="pm_editor_name" class="pm_editor_name"></span>
+                            <span id="pm_editor_subtitle" class="pm_editor_subtitle"></span>
+                        </div>
+                    </div>
+                    <button id="pm_editor_expand" type="button" class="pm_editor_expand interactable" aria-label="Toggle full screen" data-i18n-aria-label="editor.expand" title="Full screen" data-i18n-title="editor.expand">
+                        <i class="fa-solid fa-expand"></i>
+                    </button>
+                    <button id="pm_editor_close" type="button" class="pm_editor_close interactable" aria-label="Close" data-i18n-aria-label="editor.close">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+
+                <div class="pm_editor_body">
+                    <div class="pm_editor_ops">
+                        <button id="pm_op_rename" type="button" class="pm_op_btn interactable" data-i18n-title="editor.rename" title="Rename"><i class="fa-solid fa-pencil"></i></button>
+                        <button id="pm_op_image" type="button" class="pm_op_btn interactable" data-i18n-title="editor.image" title="Change image"><i class="fa-solid fa-image"></i></button>
+                        <button id="pm_op_duplicate" type="button" class="pm_op_btn interactable" data-i18n-title="editor.duplicate" title="Duplicate"><i class="fa-solid fa-clone"></i></button>
+                        <button id="pm_op_default" type="button" class="pm_op_btn interactable" data-i18n-title="editor.makeDefault" title="Set as default"><i class="fa-solid fa-crown"></i></button>
+                        <button id="pm_op_delete" type="button" class="pm_op_btn pm_op_danger interactable" data-i18n-title="editor.delete" title="Delete"><i class="fa-solid fa-trash-can"></i></button>
+                        <input id="pm_image_input" type="file" accept="image/*" hidden />
+                    </div>
+
+                    <label class="pm_field">
+                        <span class="pm_field_label" data-i18n="editor.title">Title</span>
+                        <input id="pm_field_title" type="text" class="text_pole" autocomplete="off" />
+                    </label>
+
+                    <div class="pm_field">
+                        <div class="pm_field_head">
+                            <span class="pm_field_label" data-i18n="editor.description">Description</span>
+                            <i class="pm_desc_maximize editor_maximize fa-solid fa-maximize interactable" data-for="pm_field_desc" title="Expand the editor" data-i18n-title="editor.expandDesc" tabindex="0" role="button"></i>
+                            <span class="pm_token_bar" title="">
+                                <span id="pm_token_fill" class="pm_token_fill"></span>
+                            </span>
+                            <span class="pm_token_count"><span id="pm_token_num">0</span> <span data-i18n="editor.tokens">tokens</span></span>
+                        </div>
+                        <textarea id="pm_field_desc" class="text_pole textarea_compact" rows="9" autocomplete="off"></textarea>
+                    </div>
+
+                    <label class="pm_field">
+                        <span class="pm_field_label" data-i18n="editor.position">Position</span>
+                        <select id="pm_field_position" class="text_pole">
+                            <option value="0" data-i18n="editor.pos.inPrompt">In Story String / Prompt</option>
+                            <option value="2" data-i18n="editor.pos.topAn">Top of Author's Note</option>
+                            <option value="3" data-i18n="editor.pos.bottomAn">Bottom of Author's Note</option>
+                            <option value="4" data-i18n="editor.pos.atDepth">In-chat @ Depth</option>
+                            <option value="9" data-i18n="editor.pos.none">None (disabled)</option>
+                        </select>
+                    </label>
+
+                    <div id="pm_depth_wrap" class="pm_field_row pm_hidden">
+                        <label class="pm_field pm_field_half">
+                            <span class="pm_field_label" data-i18n="editor.depth">Depth</span>
+                            <input id="pm_field_depth" type="number" min="0" max="9999" step="1" class="text_pole" />
+                        </label>
+                        <label class="pm_field pm_field_half">
+                            <span class="pm_field_label" data-i18n="editor.role">Role</span>
+                            <select id="pm_field_role" class="text_pole">
+                                <option value="0" data-i18n="editor.role.system">System</option>
+                                <option value="1" data-i18n="editor.role.user">User</option>
+                                <option value="2" data-i18n="editor.role.assistant">Assistant</option>
+                            </select>
+                        </label>
+                    </div>
+
+                    <div class="pm_field">
+                        <span class="pm_field_label" data-i18n="editor.connections">Connections</span>
+                        <div id="pm_conn_locks" class="pm_conn_locks">
+                            <button type="button" class="pm_conn_btn" data-pm-lock="default"><i class="fa-solid fa-crown"></i><span data-i18n="lock.default">Default</span></button>
+                            <button type="button" class="pm_conn_btn" data-pm-lock="character"><i class="fa-solid fa-user-lock"></i><span data-i18n="lock.character">Character</span></button>
+                            <button type="button" class="pm_conn_btn" data-pm-lock="chat"><i class="fa-solid fa-comment"></i><span data-i18n="lock.chat">Chat</span></button>
+                        </div>
+                        <div id="pm_conn_hint" class="pm_conn_hint pm_hidden" data-i18n="editor.locksHint">Select this persona first to change its locks.</div>
+                        <div id="pm_conn_list" class="pm_conn_list"></div>
+                    </div>
+
+                    <label class="pm_field">
+                        <span class="pm_field_label" data-i18n="editor.lorebook">Lorebook</span>
+                        <div class="pm_field_row">
+                            <select id="pm_field_lorebook" class="text_pole"></select>
+                            <button id="pm_lore_open" type="button" class="pm_op_btn interactable" data-i18n-title="editor.openLorebook" title="Open lorebook"><i class="fa-solid fa-up-right-from-square"></i></button>
+                        </div>
+                    </label>
+
+                    <label class="pm_field">
+                        <span class="pm_field_label" data-i18n="editor.notes">Private notes</span>
+                        <textarea id="pm_field_notes" class="text_pole textarea_compact" rows="3" autocomplete="off" data-i18n-placeholder="editor.notesPlaceholder"></textarea>
+                    </label>
+                </div>
+            </aside>
+        </div>
+
+        <div id="pm_progress" class="pm_progress pm_hidden" role="status" aria-live="polite">
+            <div class="pm_progress_card">
+                <div class="pm_progress_ring">
+                    <svg viewBox="0 0 44 44" aria-hidden="true">
+                        <circle class="pm_progress_track" cx="22" cy="22" r="19" />
+                        <circle id="pm_progress_arc" class="pm_progress_arc" cx="22" cy="22" r="19" />
+                    </svg>
+                    <span id="pm_progress_pct" class="pm_progress_pct">0%</span>
+                </div>
+                <div id="pm_progress_label" class="pm_progress_label"></div>
+            </div>
+        </div>
+    </div>
+</div>

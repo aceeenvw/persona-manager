@@ -1,0 +1,1374 @@
+/* ⊹ PERSONA MANAGER ⊹ — theme-aware styling.
+ * Signature: the panel only renders fully when [data-build] is present (set in
+ * JS from the aceenvw build stamp); removing it strips the panel chrome. */
+
+:root {
+    --pm-surface: color-mix(in srgb, var(--SmartThemeBlurTintColor, rgba(18, 18, 20, 0.96)) 88%, rgba(255, 255, 255, 0.03) 12%);
+    --pm-surface-strong: color-mix(in srgb, var(--SmartThemeBlurTintColor, rgba(18, 18, 20, 0.98)) 80%, rgba(255, 255, 255, 0.08) 20%);
+    --pm-surface-soft: color-mix(in srgb, var(--SmartThemeBlurTintColor, rgba(18, 18, 20, 0.98)) 72%, rgba(255, 255, 255, 0.14) 28%);
+    --pm-border: color-mix(in srgb, var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.16)) 80%, rgba(255, 255, 255, 0.12) 20%);
+    --pm-accent: var(--SmartThemeQuoteColor, #6aa9ff);
+    --pm-accent-soft: color-mix(in srgb, var(--SmartThemeQuoteColor, #6aa9ff) 18%, var(--SmartThemeBlurTintColor, rgba(18, 18, 20, 0.98)) 82%);
+    --pm-accent-muted: color-mix(in srgb, var(--pm-accent) 70%, var(--pm-surface) 30%);
+    --pm-text: var(--SmartThemeBodyColor, #f2f0eb);
+    --pm-muted: color-mix(in srgb, var(--SmartThemeBodyColor, #f2f0eb) 64%, var(--SmartThemeEmColor, #9b9b9b) 36%);
+    --pm-danger: #e06464;
+    --pm-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
+    --pm-radius: 16px;
+}
+
+.pm_hidden {
+    display: none !important;
+}
+
+/* ── Settings panel (extensions tab) ── */
+.persona-manager-settings .pm_settings_card {
+    margin-top: 6px;
+    padding: 14px;
+    border: 1px solid var(--pm-border);
+    border-radius: 14px;
+    background:
+        linear-gradient(180deg, color-mix(in srgb, var(--pm-accent) 9%, transparent) 0%, transparent 22%),
+        var(--pm-surface);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+    color: var(--pm-text);
+    container-type: inline-size;
+    container-name: pm-settings;
+}
+
+.persona-manager-settings .pm_settings_intro {
+    margin: 0 0 12px;
+    font-size: 0.84em;
+    line-height: 1.5;
+    color: var(--pm-muted);
+}
+
+.persona-manager-settings .pm_settings_primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 9px 14px;
+    margin: 0 0 14px;
+    cursor: pointer;
+    font-weight: 600;
+    border-radius: 999px;
+    color: var(--pm-accent);
+    background: var(--pm-accent-soft);
+    border: 1px solid var(--pm-accent);
+    transition: background 0.15s ease, transform 0.08s ease;
+}
+
+.persona-manager-settings .pm_settings_primary:hover {
+    background: color-mix(in srgb, var(--pm-accent) 26%, var(--pm-surface) 74%);
+}
+
+.persona-manager-settings .pm_settings_primary:active {
+    transform: scale(0.98);
+}
+
+.persona-manager-settings .pm_settings_section {
+    margin-top: 12px;
+}
+
+.persona-manager-settings .pm_settings_heading {
+    margin: 0 0 8px;
+    font-size: 0.72em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--pm-muted);
+}
+
+.persona-manager-settings .pm_set_row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    margin: 0 0 6px;
+    border: 1px solid var(--pm-border);
+    border-radius: 10px;
+    background: var(--pm-surface-strong);
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.persona-manager-settings .pm_set_toggle {
+    cursor: pointer;
+}
+
+.persona-manager-settings .pm_set_row:hover {
+    border-color: color-mix(in srgb, var(--pm-accent) 40%, var(--pm-border) 60%);
+}
+
+.persona-manager-settings .pm_set_row:has(input:checked) {
+    border-color: color-mix(in srgb, var(--pm-accent) 55%, var(--pm-border) 45%);
+    background: color-mix(in srgb, var(--pm-accent) 12%, var(--pm-surface-strong) 88%);
+}
+
+.persona-manager-settings .pm_set_text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.persona-manager-settings .pm_set_label {
+    font-size: 0.9em;
+    line-height: 1.35;
+}
+
+.persona-manager-settings .pm_set_desc {
+    font-size: 0.76em;
+    line-height: 1.4;
+    color: var(--pm-muted);
+}
+
+/* ── Modal shell ── */
+.pm_modal {
+    position: fixed;
+    inset: 0;
+    z-index: 3000;
+    color: var(--pm-text);
+}
+
+.pm_backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.72);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
+.pm_panel {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: min(1400px, calc(100vw - 28px));
+    height: min(880px, calc(100vh - var(--topBarBlockSize, 0px) - 24px));
+    margin: calc(var(--topBarBlockSize, 0px) + 8px) auto 16px;
+    padding: 16px;
+    border: 1px solid var(--pm-border);
+    border-radius: 20px;
+    background:
+        linear-gradient(180deg, color-mix(in srgb, var(--pm-accent) 9%, transparent) 0%, transparent 16%),
+        var(--pm-surface);
+    box-shadow: var(--pm-shadow);
+    overflow: hidden;
+    container-type: inline-size;
+    container-name: pm-panel;
+}
+
+/* Signature gate: without the JS-set build stamp, the panel chrome collapses. */
+.pm_modal[data-build=""] .pm_panel {
+    background: none;
+    border: none;
+    box-shadow: none;
+}
+
+.pm_header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    flex-shrink: 0;
+}
+
+.pm_header_copy h2 {
+    margin: 0;
+    font-size: 1.05rem;
+    line-height: 1.2;
+}
+
+.pm_header_copy p {
+    margin: 2px 0 0;
+    font-size: 0.78rem;
+    color: var(--pm-muted);
+}
+
+.pm_header_actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.pm_content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+    flex: 1 1 auto;
+    min-height: 0;
+    position: relative;
+}
+
+/* Sidebar only appears once folders exist (added in a later step). */
+.pm_content.has-folders {
+    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+}
+
+/* Editor opens as a 3rd column (or 2nd, when there are no folders). */
+.pm_content.pm-editing {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+}
+
+.pm_content.has-folders.pm-editing {
+    grid-template-columns: minmax(200px, 260px) minmax(0, 1fr) minmax(320px, 420px);
+}
+
+.pm_sidebar {
+    display: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    min-height: 0;
+    padding: 12px;
+    border: 1px solid var(--pm-border);
+    border-radius: 18px;
+    background: var(--pm-surface-strong);
+}
+
+.pm_content.has-folders .pm_sidebar {
+    display: block;
+}
+
+.pm_main {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+    min-height: 0;
+}
+
+.pm_grid {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 12px;
+    align-content: start;
+    padding: 2px;
+}
+
+/* Card size (grid density) — configurable from settings. */
+.pm_grid[data-size="small"] {
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+    gap: 10px;
+}
+
+.pm_grid[data-size="large"] {
+    grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+    gap: 14px;
+}
+
+.pm_status {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 24px 12px;
+    color: var(--pm-muted);
+    font-size: 0.86rem;
+}
+
+/* ── Spotlight (current persona) ── */
+.pm_spotlight {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    padding: 6px 10px;
+    border: 1px solid var(--pm-border);
+    border-radius: 12px;
+    background:
+        linear-gradient(180deg, color-mix(in srgb, var(--pm-accent) 8%, transparent) 0%, transparent 70%),
+        var(--pm-surface-strong);
+}
+
+.pm_spotlight_empty {
+    color: var(--pm-muted);
+    font-size: 0.84rem;
+}
+
+.pm_spotlight_avatar {
+    width: 38px;
+    height: 38px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 2px solid color-mix(in srgb, var(--pm-accent) 50%, var(--pm-border));
+}
+
+.pm_spotlight_avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.pm_spotlight_info {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.pm_spotlight_heading {
+    display: none;
+}
+
+.pm_spotlight_name {
+    font-weight: 600;
+    font-size: 0.88rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pm_spotlight_title {
+    font-size: 0.74rem;
+    color: var(--pm-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pm_spotlight_locks {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.pm_lock_btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--pm-border);
+    background: var(--pm-surface);
+    color: var(--pm-muted);
+    cursor: pointer;
+    font-size: 0.74rem;
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.pm_lock_btn:hover {
+    border-color: color-mix(in srgb, var(--pm-accent) 40%, var(--pm-border) 60%);
+}
+
+.pm_lock_btn.is-on {
+    color: var(--pm-accent);
+    border-color: var(--pm-accent);
+    background: var(--pm-accent-soft);
+}
+
+/* ── Toolbar ── */
+.pm_toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.pm_toolbar > .menu_button {
+    flex: 0 0 auto;
+    height: 32px;
+    margin: 0;
+}
+
+.pm_toolbar > select {
+    flex: 0 0 auto;
+    height: 32px;
+    margin: 0;
+    width: auto;
+}
+
+.pm_sidebar_toggle {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    border-radius: 8px;
+    border: 1px solid var(--pm-border);
+    background: var(--pm-surface-strong);
+    color: var(--pm-text);
+    cursor: pointer;
+}
+
+.pm_search_wrap {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.pm_search_wrap i {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--pm-muted);
+    pointer-events: none;
+    font-size: 0.8rem;
+}
+
+.pm_search_wrap input {
+    width: 100%;
+    height: 32px;
+    margin: 0;
+    padding-left: 30px;
+}
+
+/* ── Cards (avatar tiles) ── */
+.pm_card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid var(--pm-border);
+    border-radius: 14px;
+    background: var(--pm-surface-strong);
+    cursor: pointer;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+}
+
+.pm_card:hover {
+    border-color: color-mix(in srgb, var(--pm-accent) 45%, var(--pm-border) 55%);
+    transform: translateY(-2px);
+}
+
+.pm_card:active {
+    transform: scale(0.97);
+}
+
+.pm_card.is-active {
+    border-color: var(--pm-accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--pm-accent) 25%, transparent);
+}
+
+/* Active-persona pill, so the current persona is spottable in the list too. */
+.pm_card_active {
+    position: absolute;
+    left: 4px;
+    bottom: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    max-width: calc(100% - 8px);
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--pm-accent) 22%, rgba(0, 0, 0, 0.55) 78%);
+    color: color-mix(in srgb, var(--pm-accent) 85%, #fff 15%);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pm-accent) 45%, transparent);
+    font-size: 0.62rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    pointer-events: none;
+}
+
+.pm_card_active i {
+    font-size: 0.66rem;
+}
+
+.pm_card_cover {
+    position: relative;
+    width: 100%;
+    overflow: hidden;
+    border-radius: 10px;
+    background: var(--pm-surface);
+}
+
+.pm_card.is-default .pm_card_cover {
+    outline: 2px solid var(--golden, #f5c451);
+    outline-offset: -2px;
+}
+
+.pm_card_cover img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    height: auto;
+    object-fit: cover;
+    object-position: center top;
+}
+
+.pm_card_badges {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    display: flex;
+    gap: 3px;
+}
+
+.pm_chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.6);
+    box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+    font-size: 0.65rem;
+}
+
+.pm_chip_chat { color: #7ec4ff; }
+.pm_chip_char { color: #ffd27e; }
+.pm_chip_default { color: var(--golden, #f5c451); }
+
+.pm_card_body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    width: 100%;
+    min-width: 0;
+}
+
+.pm_card_name {
+    font-weight: 600;
+    font-size: 0.82rem;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+}
+
+.pm_card_title {
+    font-size: 0.68rem;
+    color: var(--pm-accent);
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+}
+
+/* ── Pager ── */
+.pm_pager {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    flex-shrink: 0;
+    padding-top: 4px;
+}
+
+.pm_pager_label {
+    font-size: 0.8rem;
+    color: var(--pm-muted);
+    min-width: 56px;
+    text-align: center;
+}
+
+.pm_pager_range {
+    font-size: 0.74rem;
+    color: var(--pm-muted);
+    margin-left: 4px;
+}
+
+.pm_pager button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+/* ── Sidebar folders ── */
+.pm_folder_list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.pm_folder_divider {
+    margin: 8px 4px 4px;
+    font-size: 0.66rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--pm-muted);
+}
+
+.pm_folder_row {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 9px;
+    border-radius: 9px;
+    cursor: pointer;
+    color: var(--pm-text);
+    transition: background 0.15s ease, outline-color 0.15s ease;
+}
+
+.pm_folder_row:hover {
+    background: var(--pm-surface-soft);
+}
+
+.pm_folder_row.is-active {
+    background: var(--pm-accent-soft);
+}
+
+.pm_folder_row.is-drop-target {
+    outline: 2px dashed var(--pm-accent);
+    outline-offset: -2px;
+    background: color-mix(in srgb, var(--pm-accent) 22%, transparent 78%);
+}
+
+.pm_folder_icon {
+    flex: 0 0 auto;
+    color: var(--pm-muted);
+}
+
+.pm_folder_name {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pm_folder_count {
+    flex: 0 0 auto;
+    margin-right: auto;
+    font-size: 0.72rem;
+    color: var(--pm-muted);
+    background: var(--pm-surface);
+    padding: 1px 7px;
+    border-radius: 999px;
+}
+
+/* ── Favorite star on cards ── */
+.pm_card_fav {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.5);
+    color: var(--white70a, #ddd);
+    cursor: pointer;
+    opacity: 0;
+    font-size: 0.72rem;
+    transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.pm_card:hover .pm_card_fav,
+.pm_card_fav.is-on {
+    opacity: 1;
+}
+
+.pm_card_fav.is-on {
+    color: var(--golden, #f5c451);
+}
+
+.pm_card.is-dragging {
+    opacity: 0.5;
+}
+
+/* ── Card action row (edit / move / remove / delete) ── */
+.pm_card_actions {
+    display: flex;
+    justify-content: center;
+    gap: 2px;
+    width: 100%;
+    margin-top: 2px;
+    opacity: 0;
+    max-height: 0;
+    overflow: hidden;
+    transition: opacity 0.15s ease, max-height 0.15s ease;
+}
+
+.pm_card:hover .pm_card_actions,
+.pm_card:focus-within .pm_card_actions {
+    opacity: 1;
+    max-height: 40px;
+}
+
+.pm_card_action {
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    color: var(--pm-muted);
+    cursor: pointer;
+    border-radius: 7px;
+    font-size: 0.76rem;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.pm_card_action:hover {
+    background: var(--pm-surface);
+    color: var(--pm-text);
+}
+
+.pm_card_action_danger:hover {
+    color: var(--pm-danger);
+}
+
+/* Selecting mode: hide per-card actions to avoid mis-taps. */
+.pm_selecting .pm_card_actions {
+    display: none;
+}
+
+/* ── Card select checkbox (hidden until select mode) ── */
+.pm_card_check {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    width: 24px;
+    height: 24px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    cursor: pointer;
+    font-size: 0.78rem;
+    z-index: 2;
+}
+
+.pm_selecting .pm_card_check {
+    display: inline-flex;
+}
+
+.pm_selecting .pm_card_fav {
+    display: none;
+}
+
+.pm_card.is-selected {
+    border-color: var(--pm-accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--pm-accent) 35%, transparent);
+}
+
+.pm_selecting .pm_card_check .fa-square-check {
+    color: var(--pm-accent);
+}
+
+/* ── Select bar ── */
+.pm_select_bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    padding: 8px 10px;
+    border: 1px solid var(--pm-accent);
+    border-radius: 12px;
+    background: var(--pm-accent-soft);
+}
+
+.pm_select_count {
+    font-weight: 600;
+    font-size: 0.84rem;
+    margin-right: auto;
+}
+
+.pm_btn_danger:hover {
+    color: var(--pm-danger) !important;
+    border-color: var(--pm-danger) !important;
+}
+
+/* ── Folder tools (rename / delete) ── */
+.pm_folder_tools {
+    display: flex;
+    gap: 2px;
+    flex: 0 0 auto;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.pm_folder_row:hover .pm_folder_tools {
+    opacity: 1;
+}
+
+.pm_folder_tool {
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    color: var(--pm-muted);
+    cursor: pointer;
+    border-radius: 7px;
+    font-size: 0.78rem;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.pm_folder_tool:hover {
+    background: var(--pm-surface);
+    color: var(--pm-text);
+}
+
+.pm_folder_tool_danger:hover {
+    color: var(--pm-danger);
+}
+
+/* ── Editor panel (master-detail) ── */
+.pm_editor {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    border: 1px solid var(--pm-border);
+    border-radius: 18px;
+    background: var(--pm-surface-strong);
+    opacity: 0;
+    transform: translateX(8px) scale(0.99);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.pm_content.pm-editing .pm_editor {
+    opacity: 1;
+    transform: none;
+}
+
+.pm_editor_head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--pm-border);
+    background:
+        linear-gradient(180deg, color-mix(in srgb, var(--pm-accent) 10%, transparent) 0%, transparent 90%),
+        var(--pm-surface);
+}
+
+.pm_editor_back {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--pm-text);
+    cursor: pointer;
+}
+
+.pm_editor_id {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.pm_editor_avatar {
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 2px solid color-mix(in srgb, var(--pm-accent) 45%, var(--pm-border));
+}
+
+.pm_editor_avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.pm_editor_titleblock {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+}
+
+.pm_editor_name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pm_editor_subtitle {
+    font-size: 0.74rem;
+    color: var(--pm-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pm_editor_close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--pm-muted);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.pm_editor_close:hover {
+    background: var(--pm-surface-soft);
+    color: var(--pm-text);
+}
+
+.pm_editor_expand {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--pm-muted);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.pm_editor_expand:hover {
+    background: var(--pm-surface-soft);
+    color: var(--pm-text);
+}
+
+.pm_editor_expand.is-on {
+    color: var(--pm-accent);
+}
+
+/* Maximized: editor fills the whole content area over grid + sidebar. */
+.pm-editor-max .pm_editor {
+    position: absolute;
+    inset: 0;
+    z-index: 7;
+    border-radius: 14px;
+}
+
+/* ── Progress overlay (backup / restore) ── */
+.pm_progress {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--pm-surface) 70%, rgba(0, 0, 0, 0.6) 30%);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    border-radius: inherit;
+}
+
+.pm_progress_card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 22px 28px;
+    border: 1px solid var(--pm-border);
+    border-radius: 16px;
+    background: var(--pm-surface-strong);
+    box-shadow: var(--pm-shadow);
+}
+
+.pm_progress_ring {
+    position: relative;
+    width: 72px;
+    height: 72px;
+}
+
+.pm_progress_ring svg {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+}
+
+.pm_progress_track {
+    fill: none;
+    stroke: var(--pm-border);
+    stroke-width: 4;
+}
+
+.pm_progress_arc {
+    fill: none;
+    stroke: var(--pm-accent);
+    stroke-width: 4;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.2s ease;
+}
+
+.pm_progress_pct {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--pm-text);
+}
+
+.pm_progress_label {
+    font-size: 0.8rem;
+    color: var(--pm-muted);
+    text-align: center;
+    max-width: 220px;
+}
+
+.pm_editor_body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 12px;
+}
+
+.pm_editor_ops {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.pm_op_btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--pm-border);
+    border-radius: 9px;
+    background: var(--pm-surface);
+    color: var(--pm-text);
+    cursor: pointer;
+    font-size: 0.82rem;
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.pm_op_btn:hover {
+    border-color: color-mix(in srgb, var(--pm-accent) 45%, var(--pm-border) 55%);
+}
+
+.pm_op_btn.is-on {
+    color: var(--golden, #f5c451);
+    border-color: var(--golden, #f5c451);
+}
+
+.pm_op_danger:hover {
+    color: var(--pm-danger);
+    border-color: var(--pm-danger);
+}
+
+.pm_field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.pm_field_label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--pm-muted);
+}
+
+.pm_field_head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pm_field_head .pm_field_label {
+    flex: 0 0 auto;
+}
+
+.pm_desc_maximize {
+    flex: 0 0 auto;
+    color: var(--pm-muted);
+    cursor: pointer;
+    font-size: 0.82rem;
+    padding: 2px;
+    transition: color 0.15s ease;
+}
+
+.pm_desc_maximize:hover {
+    color: var(--pm-accent);
+}
+
+.pm_field_row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+}
+
+.pm_field_half {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+.pm_field textarea,
+.pm_field input,
+.pm_field select {
+    width: 100%;
+    margin: 0;
+}
+
+.pm_field textarea {
+    resize: vertical;
+    min-height: 64px;
+}
+
+/* Token budget bar */
+.pm_token_bar {
+    flex: 1 1 auto;
+    height: 5px;
+    border-radius: 999px;
+    background: var(--pm-surface-soft);
+    overflow: hidden;
+}
+
+.pm_token_fill {
+    display: block;
+    height: 100%;
+    width: 0;
+    border-radius: 999px;
+    background: var(--pm-accent);
+    transition: width 0.2s ease, background 0.2s ease;
+}
+
+.pm_token_fill.is-warn {
+    background: var(--pm-danger);
+}
+
+.pm_token_count {
+    flex: 0 0 auto;
+    font-size: 0.7rem;
+    color: var(--pm-muted);
+}
+
+/* Connections */
+.pm_conn_locks {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.pm_conn_locks.is-disabled {
+    opacity: 0.55;
+}
+
+.pm_conn_btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--pm-border);
+    background: var(--pm-surface);
+    color: var(--pm-muted);
+    cursor: pointer;
+    font-size: 0.74rem;
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.pm_conn_btn:disabled {
+    cursor: not-allowed;
+}
+
+.pm_conn_btn:not(:disabled):hover {
+    border-color: color-mix(in srgb, var(--pm-accent) 40%, var(--pm-border) 60%);
+}
+
+.pm_conn_btn.is-on {
+    color: var(--pm-accent);
+    border-color: var(--pm-accent);
+    background: var(--pm-accent-soft);
+}
+
+.pm_conn_hint {
+    font-size: 0.74rem;
+    color: var(--pm-muted);
+    font-style: italic;
+}
+
+.pm_conn_list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.pm_conn_empty {
+    font-size: 0.74rem;
+    color: var(--pm-muted);
+}
+
+.pm_conn_avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: var(--pm-surface);
+    border: 1px solid var(--pm-border);
+    color: var(--pm-muted);
+    font-size: 0.72rem;
+}
+
+.pm_conn_avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* ── Mobile: full-screen takeover + sidebar as animated top overlay ── */
+@media (max-width: 900px) {
+    .pm_panel {
+        width: 100vw;
+        height: calc(100dvh - var(--topBarBlockSize, 0px));
+        margin: var(--topBarBlockSize, 0px) 0 0;
+        border-radius: 0;
+        border: none;
+        padding: 12px;
+    }
+
+    .pm_content {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .pm_sidebar {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 5;
+        width: auto;
+        max-height: min(60vh, 420px);
+        opacity: 1;
+        box-shadow: var(--pm-shadow);
+        transition: max-height 0.25s ease, opacity 0.2s ease;
+    }
+
+    .pm_sidebar.is-collapsed {
+        max-height: 0 !important;
+        opacity: 0;
+        pointer-events: none;
+        padding-top: 0;
+        padding-bottom: 0;
+        border: none;
+    }
+
+    .pm_content.has-folders ~ * .pm_sidebar_toggle,
+    .pm_panel:has(.pm_content.has-folders) .pm_sidebar_toggle {
+        display: inline-flex;
+    }
+
+    .pm_spotlight_locks .pm_lock_btn span {
+        display: none;
+    }
+
+    .pm_grid {
+        grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+        gap: 10px;
+    }
+
+    .pm_grid[data-size="small"] {
+        grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+        gap: 8px;
+    }
+
+    .pm_grid[data-size="large"] {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 12px;
+    }
+
+    /* Editor takes over the whole content area as a full overlay. */
+    .pm_content.pm-editing,
+    .pm_content.has-folders.pm-editing {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .pm_editor {
+        position: absolute;
+        inset: 0;
+        z-index: 6;
+        border-radius: 0;
+        border: none;
+        transform: translateY(8px);
+    }
+
+    .pm_content.pm-editing .pm_editor {
+        transform: none;
+    }
+
+    .pm_editor_back {
+        display: inline-flex;
+    }
+}
+
+@media (pointer: coarse) {
+    .pm_header_actions .menu_button {
+        min-height: 40px;
+    }
+
+    .pm_lock_btn {
+        min-height: 40px;
+    }
+
+    .pm_folder_row {
+        min-height: 46px;
+    }
+
+    /* No hover on touch — keep favorite star, card actions and folder tools reachable. */
+    .pm_card_fav {
+        opacity: 1;
+        background: rgba(0, 0, 0, 0.45);
+    }
+
+    .pm_card_actions {
+        opacity: 1;
+        max-height: 40px;
+    }
+
+    .pm_card_action {
+        width: 34px;
+        height: 34px;
+    }
+
+    .pm_folder_tools {
+        opacity: 1;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pm_sidebar,
+    .pm_editor {
+        transition: none;
+    }
+}

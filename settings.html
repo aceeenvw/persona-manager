@@ -1,0 +1,62 @@
+<div class="persona-manager-settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b>⊹ PERSONA MANAGER ⊹</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down up"></div>
+        </div>
+        <div class="inline-drawer-content" style="display: none;">
+
+            <div class="pm_settings_card">
+                <p class="pm_settings_intro" data-i18n="settings.intro">A prettier, mobile-first way to browse, organize and edit your personas.</p>
+
+                <button id="pm_open_button" type="button" class="pm_settings_primary interactable">
+                    <i class="fa-solid fa-user-pen"></i>
+                    <span data-i18n="settings.open">Open Persona Manager</span>
+                </button>
+
+                <div class="pm_settings_section">
+                    <h4 class="pm_settings_heading" data-i18n="settings.behaviorHeading">Behavior</h4>
+
+                    <label class="pm_set_row pm_set_toggle" for="pm_hijack_drawer">
+                        <span class="pm_set_text">
+                            <span class="pm_set_label" data-i18n="settings.hijack">Open manager instead of the default Persona panel</span>
+                            <span class="pm_set_desc" data-i18n="settings.hijackDesc">Clicking the Persona Management drawer button opens this manager.</span>
+                        </span>
+                        <input id="pm_hijack_drawer" type="checkbox" />
+                    </label>
+                </div>
+
+                <div class="pm_settings_section">
+                    <h4 class="pm_settings_heading" data-i18n="settings.displayHeading">Display</h4>
+
+                    <div class="pm_set_row">
+                        <span class="pm_set_text">
+                            <span class="pm_set_label" data-i18n="settings.gridSize">Card size</span>
+                            <span class="pm_set_desc" data-i18n="settings.gridSizeDesc">Grid density inside the manager.</span>
+                        </span>
+                        <select id="pm_grid_size" class="text_pole textarea_compact pm_set_control">
+                            <option value="small" data-i18n="settings.grid.small">Small</option>
+                            <option value="medium" data-i18n="settings.grid.medium">Medium</option>
+                            <option value="large" data-i18n="settings.grid.large">Large</option>
+                        </select>
+                    </div>
+
+                    <div class="pm_set_row">
+                        <span class="pm_set_text">
+                            <span class="pm_set_label" data-i18n="settings.pageSize">Personas per page</span>
+                            <span class="pm_set_desc" data-i18n="settings.pageSizeDesc">Fewer per page keeps large libraries fast.</span>
+                        </span>
+                        <select id="pm_page_size" class="text_pole textarea_compact pm_set_control">
+                            <option value="10">10</option>
+                            <option value="30">30</option>
+                            <option value="60">60</option>
+                            <option value="100">100</option>
+                        </select>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+    </div>
+</div>

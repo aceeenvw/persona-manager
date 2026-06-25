@@ -1,0 +1,1882 @@
+import {
+    eventSource,
+    event_types,
+    saveSettingsDebounced,
+    getThumbnailUrl,
+    setUserName,
+    name1,
+} from '../../../../script.js';
+import { extension_settings, renderExtensionTemplateAsync } from '../../../extensions.js';
+import { power_user } from '../../../power-user.js';
+import {
+    getUserAvatars,
+    getUserAvatar,
+    setUserAvatar,
+    user_avatar,
+    isPersonaLocked,
+    setPersonaLockState,
+} from '../../../personas.js';
+import { world_names, openWorldInfoEditor } from '../../../world-info.js';
+import { isFirefox } from '../../../browser-fixes.js';
+
+const VERSION = '1.0.0';
+const MODULE_SETTINGS_KEY = 'aevPersonaManager';
+
+// ── Signature (aceenvw) ───────────────────────────────────────────────────
+// `_SIG` is rebuilt from delta-encoded byte differences of the author string,
+// never stored as a plaintext literal. It seeds the build stamp written to the
+// modal's [data-build] attribute (CSS gates the panel chrome on its presence).
+const _SIG = (() => {
+    const deltas = [2, 2, 0, 9, 8, 1]; // diffs between consecutive bytes of the author
+    let code = 97; // 'a'
+    let out = String.fromCharCode(code);
+    for (const d of deltas) { code += d; out += String.fromCharCode(code); }
+    return out;
+})();
+
+function fnv1a(seed) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < seed.length; i++) {
+        h ^= seed.charCodeAt(i);
+        h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+    }
+    return h >>> 0;
+}
+
+function buildStamp(version) {
+    try {
+        return btoa(JSON.stringify({ a: _SIG, v: version, h: fnv1a(version).toString(16) }));
+    } catch (_) {
+        return '';
+    }
+}
+
+const DEFAULT_SETTINGS = {
+    hijackDrawer: true,
+    sort: 'az',
+    view: 'grid',
+    gridSize: 'medium',
+    pageSize: 30,
+    folders: [],
+    assignments: {},
+    tags: {},
+    tagDefs: [],
+    favorites: [],
+    notes: {},
+    templates: [],
+    firstSeen: {},
+    lastUsed: {},
+    schemaVersion: 1,
+};
+
+/** Resolve the extension folder name from the module URL. */
+const EXTENSION_NAME = (() => {
+    const m = String(import.meta.url).match(/\/scripts\/extensions\/(.+)\/[^/]+$/);
+    return m ? m[1] : 'third-party/persona-manager';
+})();
+
+function getContext() {
+    return SillyTavern.getContext();
+}
+
+// ── Module state ──────────────────────────────────────────────────────────
+const FOLDER_ALL = '__all__';
+const FOLDER_UNFILED = '__unfiled__';
+const FOLDER_FAVORITES = '__favorites__';
+
+// Persona description positions + defaults, mirroring personas.js.
+const POS = { IN_PROMPT: 0, TOP_AN: 2, BOTTOM_AN: 3, AT_DEPTH: 4, NONE: 9 };
+const DEFAULT_DEPTH = 2;
+const DEFAULT_ROLE = 0;
+const TOKEN_WARN = 2000; // soft budget for the description token bar
+
+const PAGE_SIZES = Object.freeze([10, 30, 60, 100]);
+const GRID_SIZES = Object.freeze(['small', 'medium', 'large']);
+
+const state = {
+    isOpen: false,
+    suppressDrawerHijack: false,
+    dom: {},
+    avatars: null,          // cached list of avatar ids from getUserAvatars(false)
+    search: '',
+    sort: 'az',
+    pageSize: 30,
+    currentPage: 1,
+    selectedId: null,
+    activeFolderId: FOLDER_ALL,
+    dragId: null,           // avatar id being dragged
+    selectMode: false,
+    selected: new Set(),    // avatar ids selected for bulk actions
+    editorId: null,         // avatar id currently open in the editor panel
+    editorMaximized: false, // editor panel expanded to fill the modal
+    suppressEditorRerender: false, // guard against re-rendering during our own edits
+    busy: false,            // backup/restore in progress
+};
+
+const FALLBACK_AVATAR_URL = '/img/ai4.png';
+
+// Probe once whether ST serves persona thumbnails (some setups/platforms don't
+// generate them, which 404s on mobile). If not, fall back to the full avatar.
+let _supportsPersonaThumbnails = null;
+function supportsPersonaThumbnails() {
+    if (_supportsPersonaThumbnails === null) {
+        try {
+            _supportsPersonaThumbnails = String(getThumbnailUrl('persona', 'probe.png', true)).includes('&t=');
+        } catch (_) {
+            _supportsPersonaThumbnails = false;
+        }
+    }
+    return _supportsPersonaThumbnails;
+}
+
+/** Resolve an image URL for a persona avatar id, robust across platforms. */
+function personaImageUrl(avatarId) {
+    if (!avatarId) return FALLBACK_AVATAR_URL;
+    try {
+        if (supportsPersonaThumbnails()) {
+            const url = getThumbnailUrl('persona', avatarId, isFirefox());
+            if (typeof url === 'string' && url) return url;
+        }
+        // getUserAvatar() => "User Avatars/<file>"; encode each path segment so
+        // the space in the directory name doesn't break the request.
+        const path = getUserAvatar(avatarId).split('/').map(encodeURIComponent).join('/');
+        return `/${path}`;
+    } catch (_) {
+        return FALLBACK_AVATAR_URL;
+    }
+}
+
+/** Persona metadata view-model for an avatar id. */
+function personaMeta(avatarId) {
+    const name = power_user.personas?.[avatarId] || '[Unnamed Persona]';
+    const desc = power_user.persona_descriptions?.[avatarId];
+    return {
+        id: avatarId,
+        name,
+        title: desc?.title || '',
+        description: desc?.description || '',
+        isDefault: power_user.default_persona === avatarId,
+        isCurrent: avatarId === user_avatar,
+    };
+}
+
+// ── i18n (EN / RU) ────────────────────────────────────────────────────────
+const I18N = {
+    en: {
+        'app.title': '⊹ Persona Manager ⊹',
+        'app.subtitle': 'Browse, organize and edit your personas.',
+        'action.close': 'Close',
+        'toolbar.search': 'Search...',
+        'sort.az': 'Name A-Z',
+        'sort.za': 'Name Z-A',
+        'sort.newest': 'Newest first',
+        'sort.oldest': 'Oldest first',
+        'pager.prev': 'Previous page',
+        'pager.next': 'Next page',
+        'pager.range': '{from}–{to} of {total}',
+        'status.empty': 'No personas match this view yet.',
+        'spotlight.heading': 'Current persona',
+        'spotlight.none': 'No persona selected',
+        'lock.chat': 'Chat',
+        'lock.character': 'Character',
+        'lock.default': 'Default',
+        'action.favorite': 'Toggle favorite',
+        'card.active': 'Active',
+        'card.edit': 'Edit',
+        'card.move': 'Move to folder',
+        'card.removeFromFolder': 'Remove from this folder',
+        'card.delete': 'Delete persona',
+        'card.deleteConfirm': 'Delete persona "{name}"? This cannot be undone.',
+        'folder.all': 'All personas',
+        'folder.favorites': 'Favorites',
+        'folder.unfiled': 'Unsorted',
+        'folder.heading': 'Folders',
+        'folder.new': 'New folder',
+        'folder.namePrompt': 'Enter a name for the new folder:',
+        'folder.rename': 'Rename folder',
+        'folder.pickPrompt': 'Move to folder:',
+        'folder.delete': 'Delete folder',
+        'folder.deleteConfirm': 'Delete folder "{name}"? Personas inside will move to Unsorted.',
+        'select.toggle': 'Select',
+        'select.all': 'Select all',
+        'select.cancel': 'Cancel',
+        'select.move': 'Move',
+        'select.favorite': 'Favorite',
+        'select.delete': 'Delete',
+        'select.count': '{n} selected',
+        'select.deleteConfirm': 'Delete {n} persona(s)? This cannot be undone.',
+        'backup.export': 'Backup personas (.zip)',
+        'backup.import': 'Restore personas (.zip)',
+        'backup.empty': 'No personas to back up.',
+        'backup.noZip': 'ZIP library unavailable.',
+        'backup.invalid': 'Invalid or unreadable backup file.',
+        'backup.exported': 'Backed up {n} persona(s).',
+        'backup.exportedPartial': 'Backup done, but {n} image(s) failed.',
+        'backup.restored': 'Restored {n} persona(s) ({skipped} skipped).',
+        'backup.restoredPartial': 'Restored {n} persona(s); {f} image(s) failed.',
+        'backup.progressExport': 'Backing up personas…',
+        'backup.progressZip': 'Compressing…',
+        'backup.progressImport': 'Restoring personas…',
+        'settings.intro': 'A prettier, mobile-first way to browse, organize and edit your personas.',
+        'settings.open': 'Open Persona Manager',
+        'settings.behaviorHeading': 'Behavior',
+        'settings.hijack': 'Open manager instead of the default Persona panel',
+        'settings.hijackDesc': 'Clicking the Persona Management drawer button opens this manager.',
+        'settings.displayHeading': 'Display',
+        'settings.gridSize': 'Card size',
+        'settings.gridSizeDesc': 'Grid density inside the manager.',
+        'settings.grid.small': 'Small',
+        'settings.grid.medium': 'Medium',
+        'settings.grid.large': 'Large',
+        'settings.pageSize': 'Personas per page',
+        'settings.pageSizeDesc': 'Fewer per page keeps large libraries fast.',
+        'editor.back': 'Back',
+        'editor.close': 'Close editor',
+        'editor.expand': 'Full screen',
+        'editor.collapse': 'Exit full screen',
+        'editor.expandDesc': 'Expand the description editor',
+        'editor.rename': 'Rename persona',
+        'editor.image': 'Change image',
+        'editor.duplicate': 'Duplicate persona',
+        'editor.makeDefault': 'Set as default',
+        'editor.delete': 'Delete persona',
+        'editor.title': 'Title',
+        'editor.description': 'Description',
+        'editor.tokens': 'tokens',
+        'editor.position': 'Position',
+        'editor.pos.inPrompt': 'In Story String / Prompt',
+        'editor.pos.topAn': "Top of Author's Note",
+        'editor.pos.bottomAn': "Bottom of Author's Note",
+        'editor.pos.atDepth': 'In-chat @ Depth',
+        'editor.pos.none': 'None (disabled)',
+        'editor.depth': 'Depth',
+        'editor.role': 'Role',
+        'editor.role.system': 'System',
+        'editor.role.user': 'User',
+        'editor.role.assistant': 'Assistant',
+        'editor.connections': 'Connections',
+        'editor.locksHint': 'Select this persona first to change its locks.',
+        'editor.noConnections': 'No character connections yet.',
+        'editor.lorebook': 'Lorebook',
+        'editor.lorebook.none': 'None',
+        'editor.openLorebook': 'Open lorebook',
+        'editor.notes': 'Private notes',
+        'editor.notesPlaceholder': 'Notes visible only here, never sent to the model.',
+        'editor.renamePrompt': 'Enter a new name for this persona:',
+        'editor.duplicateConfirm': 'Duplicate persona "{name}"?',
+        'editor.imageError': 'Failed to update the persona image.',
+        'editor.duplicateError': 'Failed to duplicate the persona.',
+    },
+    ru: {
+        'app.title': '⊹ Менеджер Персон ⊹',
+        'app.subtitle': 'Просматривайте, организуйте и редактируйте свои персоны.',
+        'action.close': 'Закрыть',
+        'toolbar.search': 'Поиск...',
+        'sort.az': 'Имя А-Я',
+        'sort.za': 'Имя Я-А',
+        'sort.newest': 'Сначала новые',
+        'sort.oldest': 'Сначала старые',
+        'pager.prev': 'Предыдущая страница',
+        'pager.next': 'Следующая страница',
+        'pager.range': '{from}–{to} из {total}',
+        'status.empty': 'Нет персон, подходящих под этот вид.',
+        'spotlight.heading': 'Текущая персона',
+        'spotlight.none': 'Персона не выбрана',
+        'lock.chat': 'Чат',
+        'lock.character': 'Персонаж',
+        'lock.default': 'По умолчанию',
+        'action.favorite': 'В избранное',
+        'card.active': 'Активна',
+        'card.edit': 'Редактировать',
+        'card.move': 'Переместить в папку',
+        'card.removeFromFolder': 'Убрать из этой папки',
+        'card.delete': 'Удалить персону',
+        'card.deleteConfirm': 'Удалить персону «{name}»? Это действие необратимо.',
+        'folder.all': 'Все персоны',
+        'folder.favorites': 'Избранное',
+        'folder.unfiled': 'Несортированное',
+        'folder.heading': 'Папки',
+        'folder.new': 'Новая папка',
+        'folder.namePrompt': 'Введите название новой папки:',
+        'folder.rename': 'Переименовать папку',
+        'folder.pickPrompt': 'Переместить в папку:',
+        'folder.delete': 'Удалить папку',
+        'folder.deleteConfirm': 'Удалить папку «{name}»? Персоны из неё переместятся в «Несортированное».',
+        'select.toggle': 'Выбрать',
+        'select.all': 'Выбрать все',
+        'select.cancel': 'Отмена',
+        'select.move': 'Переместить',
+        'select.favorite': 'В избранное',
+        'select.delete': 'Удалить',
+        'select.count': 'Выбрано: {n}',
+        'select.deleteConfirm': 'Удалить персон ({n})? Это действие необратимо.',
+        'backup.export': 'Резервная копия персон (.zip)',
+        'backup.import': 'Восстановить персон (.zip)',
+        'backup.empty': 'Нет персон для резервной копии.',
+        'backup.noZip': 'Библиотека ZIP недоступна.',
+        'backup.invalid': 'Недопустимый или нечитаемый файл резервной копии.',
+        'backup.exported': 'Сохранено персон: {n}.',
+        'backup.exportedPartial': 'Готово, но не удалось сохранить изображений: {n}.',
+        'backup.restored': 'Восстановлено персон: {n} (пропущено: {skipped}).',
+        'backup.restoredPartial': 'Восстановлено персон: {n}; не удалось изображений: {f}.',
+        'backup.progressExport': 'Создание резервной копии…',
+        'backup.progressZip': 'Сжатие…',
+        'backup.progressImport': 'Восстановление персон…',
+        'settings.intro': 'Более красивый и удобный для мобильных способ управлять персонами.',
+        'settings.open': 'Открыть Менеджер Персон',
+        'settings.behaviorHeading': 'Поведение',
+        'settings.hijack': 'Открывать менеджер вместо стандартной панели персон',
+        'settings.hijackDesc': 'Нажатие на кнопку панели управления персонами открывает этот менеджер.',
+        'settings.displayHeading': 'Отображение',
+        'settings.gridSize': 'Размер карточек',
+        'settings.gridSizeDesc': 'Плотность сетки внутри менеджера.',
+        'settings.grid.small': 'Маленький',
+        'settings.grid.medium': 'Средний',
+        'settings.grid.large': 'Большой',
+        'settings.pageSize': 'Персон на странице',
+        'settings.pageSizeDesc': 'Меньше на странице — быстрее работает большая библиотека.',
+        'editor.back': 'Назад',
+        'editor.close': 'Закрыть редактор',
+        'editor.expand': 'На весь экран',
+        'editor.collapse': 'Свернуть',
+        'editor.expandDesc': 'Развернуть редактор описания',
+        'editor.rename': 'Переименовать персону',
+        'editor.image': 'Сменить изображение',
+        'editor.duplicate': 'Дублировать персону',
+        'editor.makeDefault': 'Сделать по умолчанию',
+        'editor.delete': 'Удалить персону',
+        'editor.title': 'Заголовок',
+        'editor.description': 'Описание',
+        'editor.tokens': 'токенов',
+        'editor.position': 'Позиция',
+        'editor.pos.inPrompt': 'В строке истории / промпте',
+        'editor.pos.topAn': 'Вверху заметок автора',
+        'editor.pos.bottomAn': 'Внизу заметок автора',
+        'editor.pos.atDepth': 'В чате на глубине',
+        'editor.pos.none': 'Отключено',
+        'editor.depth': 'Глубина',
+        'editor.role': 'Роль',
+        'editor.role.system': 'Система',
+        'editor.role.user': 'Пользователь',
+        'editor.role.assistant': 'Ассистент',
+        'editor.connections': 'Связи',
+        'editor.locksHint': 'Сначала выберите эту персону, чтобы менять её привязки.',
+        'editor.noConnections': 'Пока нет связей с персонажами.',
+        'editor.lorebook': 'Лорбук',
+        'editor.lorebook.none': 'Нет',
+        'editor.openLorebook': 'Открыть лорбук',
+        'editor.notes': 'Личные заметки',
+        'editor.notesPlaceholder': 'Заметки видны только здесь и не отправляются модели.',
+        'editor.renamePrompt': 'Введите новое имя для этой персоны:',
+        'editor.duplicateConfirm': 'Дублировать персону «{name}»?',
+        'editor.imageError': 'Не удалось обновить изображение персоны.',
+        'editor.duplicateError': 'Не удалось дублировать персону.',
+    },
+};
+
+let LANG = 'en';
+
+function detectLang() {
+    const candidates = [];
+    try {
+        const c = getContext();
+        if (c && typeof c.getCurrentLocale === 'function') candidates.push(c.getCurrentLocale());
+        candidates.push(c?.powerUserSettings?.locale);
+    } catch (_) { /* ignore */ }
+    try { candidates.push(localStorage.getItem('language')); } catch (_) { /* ignore */ }
+    for (const raw of candidates) {
+        if (typeof raw !== 'string' || !raw) continue;
+        if (raw.toLowerCase().split(/[-_]/)[0] === 'ru') return 'ru';
+    }
+    return 'en';
+}
+
+function t(key, params) {
+    let str = (I18N[LANG] && I18N[LANG][key]) ?? I18N.en[key] ?? key;
+    if (params) {
+        str = str.replace(/\{(\w+)\}/g, (m, k) => (k in params ? String(params[k]) : m));
+    }
+    return str;
+}
+
+function i18nApplyDom(root) {
+    if (!root) return;
+    root.querySelectorAll('[data-i18n]').forEach((el) => {
+        el.textContent = t(el.getAttribute('data-i18n'));
+    });
+    const attrs = [['data-i18n-title', 'title'], ['data-i18n-placeholder', 'placeholder'], ['data-i18n-aria-label', 'aria-label']];
+    for (const [dataAttr, realAttr] of attrs) {
+        root.querySelectorAll(`[${dataAttr}]`).forEach((el) => {
+            el.setAttribute(realAttr, t(el.getAttribute(dataAttr)));
+        });
+    }
+}
+
+/** Lazily get-or-create settings, back-filling defaults. */
+function getSettings() {
+    if (!extension_settings[MODULE_SETTINGS_KEY] || typeof extension_settings[MODULE_SETTINGS_KEY] !== 'object') {
+        extension_settings[MODULE_SETTINGS_KEY] = structuredClone(DEFAULT_SETTINGS);
+    }
+    const s = extension_settings[MODULE_SETTINGS_KEY];
+    for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) {
+        if (!(k in s)) s[k] = structuredClone(v);
+    }
+    if (!GRID_SIZES.includes(s.gridSize)) s.gridSize = DEFAULT_SETTINGS.gridSize;
+    if (!PAGE_SIZES.includes(Number(s.pageSize))) s.pageSize = DEFAULT_SETTINGS.pageSize;
+    return s;
+}
+
+function saveSettings() {
+    saveSettingsDebounced();
+}
+
+/** Inject the settings panel into the extensions tab. */
+async function injectSettingsPanel() {
+    const html = await renderExtensionTemplateAsync(EXTENSION_NAME, 'settings');
+    const $node = $(html);
+    $('#extensions_settings').append($node);
+    if ($node[0]) i18nApplyDom($node[0]);
+    bindSettingsUI();
+}
+
+function bindSettingsUI() {
+    const s = getSettings();
+    const $hijack = $('#pm_hijack_drawer');
+    $hijack.prop('checked', !!s.hijackDrawer);
+    $hijack.off('change.pm').on('change.pm', function () {
+        s.hijackDrawer = $(this).prop('checked');
+        saveSettings();
+    });
+
+    const $grid = $('#pm_grid_size');
+    $grid.val(s.gridSize);
+    $grid.off('change.pm').on('change.pm', function () {
+        const val = String($(this).val());
+        s.gridSize = GRID_SIZES.includes(val) ? val : DEFAULT_SETTINGS.gridSize;
+        saveSettings();
+        if (state.isOpen) { applyGridSize(); renderGrid(); }
+    });
+
+    const $page = $('#pm_page_size');
+    $page.val(String(s.pageSize));
+    $page.off('change.pm').on('change.pm', function () {
+        const val = Number($(this).val());
+        s.pageSize = PAGE_SIZES.includes(val) ? val : DEFAULT_SETTINGS.pageSize;
+        saveSettings();
+        if (state.isOpen) { state.pageSize = s.pageSize; state.currentPage = 1; renderGrid(); }
+    });
+
+    $('#pm_open_button').off('click.pm').on('click.pm', () => openManager());
+}
+
+// ── Data & rendering ──────────────────────────────────────────────────────
+function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, (c) => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+}
+
+async function loadAvatars(force = false) {
+    if (state.avatars && !force) return state.avatars;
+    const list = await getUserAvatars(false);
+    state.avatars = Array.isArray(list) ? list : [];
+    return state.avatars;
+}
+
+// ── Folders & favorites ───────────────────────────────────────────────────
+function isFavorite(avatarId) {
+    return getSettings().favorites.includes(avatarId);
+}
+
+function toggleFavorite(avatarId) {
+    const favs = getSettings().favorites;
+    const i = favs.indexOf(avatarId);
+    if (i >= 0) favs.splice(i, 1);
+    else favs.push(avatarId);
+    saveSettings();
+}
+
+function folderOf(avatarId) {
+    return getSettings().assignments[avatarId] || null;
+}
+
+function assignToFolder(avatarId, folderId) {
+    const s = getSettings();
+    if (!folderId || folderId === FOLDER_UNFILED) delete s.assignments[avatarId];
+    else s.assignments[avatarId] = folderId;
+    saveSettings();
+}
+
+function createFolder(name) {
+    const s = getSettings();
+    const folder = { id: getContext().uuidv4(), name: String(name).trim(), sortOrder: s.folders.length };
+    s.folders.push(folder);
+    saveSettings();
+    return folder;
+}
+
+function deleteFolder(folderId) {
+    const s = getSettings();
+    s.folders = s.folders.filter((f) => f.id !== folderId);
+    for (const [id, fid] of Object.entries(s.assignments)) {
+        if (fid === folderId) delete s.assignments[id];
+    }
+    if (state.activeFolderId === folderId) state.activeFolderId = FOLDER_ALL;
+    saveSettings();
+}
+
+function renameFolder(folderId, name) {
+    const folder = getSettings().folders.find((f) => f.id === folderId);
+    if (!folder) return;
+    folder.name = String(name).trim();
+    saveSettings();
+}
+
+function countInFolder(folderId) {
+    const list = state.avatars || [];
+    if (folderId === FOLDER_ALL) return list.length;
+    if (folderId === FOLDER_FAVORITES) return list.filter(isFavorite).length;
+    if (folderId === FOLDER_UNFILED) return list.filter((id) => !folderOf(id)).length;
+    return list.filter((id) => folderOf(id) === folderId).length;
+}
+
+function hasFolders() {
+    return getSettings().folders.length > 0;
+}
+
+/**
+ * Resolve a persona's creation time for newest/oldest sort. Persona avatar ids
+ * are minted as `${Date.now()}-name.png`, so the leading epoch is the real
+ * creation timestamp. Falls back to a remembered firstSeen, then 0.
+ */
+function personaTimestamp(avatarId) {
+    const m = String(avatarId).match(/^(\d{10,})/);
+    if (m) return Number(m[1]);
+    const seen = getSettings().firstSeen?.[avatarId];
+    return typeof seen === 'number' ? seen : 0;
+}
+
+function getVisiblePersonas() {
+    const term = state.search.trim().toLowerCase();
+    let list = (state.avatars || []).map(personaMeta);
+
+    // Folder filter (skipped while searching, so search spans the whole library).
+    const folder = state.activeFolderId;
+    if (!term && folder && folder !== FOLDER_ALL) {
+        if (folder === FOLDER_FAVORITES) list = list.filter((p) => isFavorite(p.id));
+        else if (folder === FOLDER_UNFILED) list = list.filter((p) => !folderOf(p.id));
+        else list = list.filter((p) => folderOf(p.id) === folder);
+    }
+
+    if (term) {
+        list = list.filter((p) =>
+            p.name.toLowerCase().includes(term) ||
+            p.title.toLowerCase().includes(term) ||
+            p.description.toLowerCase().includes(term));
+    }
+
+    const cmp = (a, b) => a.name.localeCompare(b.name);
+    switch (state.sort) {
+        case 'za':
+            list.sort((a, b) => cmp(b, a));
+            break;
+        case 'newest':
+            list.sort((a, b) => personaTimestamp(b.id) - personaTimestamp(a.id) || cmp(a, b));
+            break;
+        case 'oldest':
+            list.sort((a, b) => personaTimestamp(a.id) - personaTimestamp(b.id) || cmp(a, b));
+            break;
+        case 'az':
+        default:
+            list.sort(cmp);
+            break;
+    }
+
+    // Favorites float to the top in every view.
+    list.sort((a, b) => (isFavorite(b.id) ? 1 : 0) - (isFavorite(a.id) ? 1 : 0));
+    return list;
+}
+
+function totalPages(count) {
+    return Math.max(1, Math.ceil(count / state.pageSize));
+}
+
+function lockBadgesHtml(meta) {
+    if (!meta.isCurrent) {
+        return meta.isDefault
+            ? '<span class="pm_chip pm_chip_default"><i class="fa-solid fa-crown"></i></span>'
+            : '';
+    }
+    const chips = [];
+    if (isPersonaLocked('chat')) chips.push('<span class="pm_chip pm_chip_chat"><i class="fa-solid fa-comment"></i></span>');
+    if (isPersonaLocked('character')) chips.push('<span class="pm_chip pm_chip_char"><i class="fa-solid fa-user-lock"></i></span>');
+    if (meta.isDefault) chips.push('<span class="pm_chip pm_chip_default"><i class="fa-solid fa-crown"></i></span>');
+    return chips.join('');
+}
+
+/** Reflect the configured card size onto the grid for CSS density rules. */
+function applyGridSize() {
+    if (state.dom.grid) state.dom.grid.dataset.size = getSettings().gridSize;
+}
+
+function renderGrid() {
+    const grid = state.dom.grid;
+    if (!grid) return;
+    applyGridSize();
+
+    const all = getVisiblePersonas();
+    const pages = totalPages(all.length);
+    state.currentPage = Math.min(Math.max(1, state.currentPage), pages);
+    const start = (state.currentPage - 1) * state.pageSize;
+    const pageItems = all.slice(start, start + state.pageSize);
+
+    const fid = state.activeFolderId;
+    const inRealFolder = fid && fid !== FOLDER_ALL && fid !== FOLDER_FAVORITES && fid !== FOLDER_UNFILED;
+
+    grid.innerHTML = '';
+    for (const meta of pageItems) {
+        const card = document.createElement('div');
+        card.className = 'pm_card interactable';
+        if (meta.isCurrent) card.classList.add('is-active');
+        if (meta.isDefault) card.classList.add('is-default');
+        if (state.selected.has(meta.id)) card.classList.add('is-selected');
+        card.dataset.avatarId = meta.id;
+        card.tabIndex = 0;
+        card.draggable = !state.selectMode;
+        card.title = meta.title ? `${meta.name} — ${meta.title}` : meta.name;
+        const fav = isFavorite(meta.id);
+        const checked = state.selected.has(meta.id);
+        card.innerHTML = `
+            <div class="pm_card_cover">
+                <img src="${escapeHtml(personaImageUrl(meta.id))}" alt="${escapeHtml(meta.name)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${FALLBACK_AVATAR_URL}';" />
+                <button type="button" class="pm_card_check" data-pm-check="${escapeHtml(meta.id)}" aria-label="select">
+                    <i class="fa-${checked ? 'solid fa-square-check' : 'regular fa-square'}"></i>
+                </button>
+                <button type="button" class="pm_card_fav ${fav ? 'is-on' : ''}" data-pm-fav="${escapeHtml(meta.id)}" title="${escapeHtml(t('action.favorite'))}" aria-label="${escapeHtml(t('action.favorite'))}">
+                    <i class="fa-${fav ? 'solid' : 'regular'} fa-star"></i>
+                </button>
+                <div class="pm_card_badges">${lockBadgesHtml(meta)}</div>
+                ${meta.isCurrent ? `<span class="pm_card_active"><i class="fa-solid fa-circle-check"></i>${escapeHtml(t('card.active'))}</span>` : ''}
+            </div>
+            <div class="pm_card_body">
+                <span class="pm_card_name">${escapeHtml(meta.name)}</span>
+                ${meta.title ? `<span class="pm_card_title">${escapeHtml(meta.title)}</span>` : ''}
+            </div>
+            <div class="pm_card_actions">
+                <button type="button" class="pm_card_action" data-pm-card="edit" title="${escapeHtml(t('card.edit'))}" aria-label="${escapeHtml(t('card.edit'))}"><i class="fa-solid fa-pencil"></i></button>
+                <button type="button" class="pm_card_action" data-pm-card="move" title="${escapeHtml(t('card.move'))}" aria-label="${escapeHtml(t('card.move'))}"><i class="fa-solid fa-folder-open"></i></button>
+                ${inRealFolder ? `<button type="button" class="pm_card_action" data-pm-card="remove" title="${escapeHtml(t('card.removeFromFolder'))}" aria-label="${escapeHtml(t('card.removeFromFolder'))}"><i class="fa-solid fa-folder-minus"></i></button>` : ''}
+                <button type="button" class="pm_card_action pm_card_action_danger" data-pm-card="delete" title="${escapeHtml(t('card.delete'))}" aria-label="${escapeHtml(t('card.delete'))}"><i class="fa-solid fa-trash-can"></i></button>
+            </div>`;
+        grid.appendChild(card);
+    }
+
+    const isEmpty = all.length === 0;
+    state.dom.empty.classList.toggle('pm_hidden', !isEmpty);
+    grid.classList.toggle('pm_hidden', isEmpty);
+    if (isEmpty) state.dom.empty.textContent = t('status.empty');
+
+    updateSelectUI();
+    renderPager(pages, all.length);
+}
+
+function renderPager(pages, total) {
+    const pager = state.dom.pager;
+    if (!pager) return;
+    pager.classList.toggle('pm_hidden', pages <= 1);
+    state.dom.pagerLabel.textContent = `${state.currentPage} / ${pages}`;
+    state.dom.pagerPrev.disabled = state.currentPage <= 1;
+    state.dom.pagerNext.disabled = state.currentPage >= pages;
+    if (state.dom.pagerRange) {
+        if (total > 0) {
+            const from = (state.currentPage - 1) * state.pageSize + 1;
+            const to = Math.min(state.currentPage * state.pageSize, total);
+            state.dom.pagerRange.textContent = t('pager.range', { from, to, total });
+        } else {
+            state.dom.pagerRange.textContent = '';
+        }
+    }
+}
+
+function renderSpotlight() {
+    const el = state.dom.spotlight;
+    if (!el) return;
+    const id = user_avatar;
+    if (!id) {
+        el.innerHTML = `<div class="pm_spotlight_empty">${escapeHtml(t('spotlight.none'))}</div>`;
+        return;
+    }
+    const meta = personaMeta(id);
+    el.innerHTML = `
+        <div class="pm_spotlight_avatar">
+            <img src="${escapeHtml(personaImageUrl(id))}" alt="${escapeHtml(meta.name)}" onerror="this.onerror=null;this.src='${FALLBACK_AVATAR_URL}';" />
+        </div>
+        <div class="pm_spotlight_info">
+            <span class="pm_spotlight_heading">${escapeHtml(t('spotlight.heading'))}</span>
+            <span class="pm_spotlight_name">${escapeHtml(meta.name)}</span>
+            ${meta.title ? `<span class="pm_spotlight_title">${escapeHtml(meta.title)}</span>` : ''}
+        </div>
+        <div class="pm_spotlight_locks">
+            <button type="button" class="pm_lock_btn ${isPersonaLocked('chat') ? 'is-on' : ''}" data-pm-lock="chat" title="${escapeHtml(t('lock.chat'))}">
+                <i class="fa-solid fa-comment"></i><span>${escapeHtml(t('lock.chat'))}</span>
+            </button>
+            <button type="button" class="pm_lock_btn ${isPersonaLocked('character') ? 'is-on' : ''}" data-pm-lock="character" title="${escapeHtml(t('lock.character'))}">
+                <i class="fa-solid fa-user-lock"></i><span>${escapeHtml(t('lock.character'))}</span>
+            </button>
+            <button type="button" class="pm_lock_btn ${isPersonaLocked('default') ? 'is-on' : ''}" data-pm-lock="default" title="${escapeHtml(t('lock.default'))}">
+                <i class="fa-solid fa-crown"></i><span>${escapeHtml(t('lock.default'))}</span>
+            </button>
+        </div>`;
+}
+
+function folderRowHtml(id, label, icon, { fixed = false } = {}) {
+    const active = state.activeFolderId === id ? ' is-active' : '';
+    const count = countInFolder(id);
+    const tools = fixed ? '' : `
+            <div class="pm_folder_tools">
+                <button type="button" class="pm_folder_tool" data-folder-rename="${escapeHtml(id)}" title="${escapeHtml(t('folder.rename'))}" aria-label="${escapeHtml(t('folder.rename'))}"><i class="fa-solid fa-pencil"></i></button>
+                <button type="button" class="pm_folder_tool pm_folder_tool_danger" data-folder-del="${escapeHtml(id)}" title="${escapeHtml(t('folder.delete'))}" aria-label="${escapeHtml(t('folder.delete'))}"><i class="fa-solid fa-trash-can"></i></button>
+            </div>`;
+    return `
+        <div class="pm_folder_row${active}" data-folder-id="${escapeHtml(id)}" tabindex="0" role="button">
+            <i class="fa-solid ${icon} pm_folder_icon"></i>
+            <span class="pm_folder_name">${escapeHtml(label)}</span>
+            <span class="pm_folder_count">${count}</span>${tools}
+        </div>`;
+}
+
+function renderSidebar() {
+    const el = state.dom.sidebar;
+    if (!el) return;
+    const s = getSettings();
+    const folders = [...s.folders].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+
+    let html = `<div class="pm_folder_list">`;
+    html += folderRowHtml(FOLDER_ALL, t('folder.all'), 'fa-layer-group', { fixed: true });
+    html += folderRowHtml(FOLDER_FAVORITES, t('folder.favorites'), 'fa-star', { fixed: true });
+    html += folderRowHtml(FOLDER_UNFILED, t('folder.unfiled'), 'fa-inbox', { fixed: true });
+    if (folders.length) html += `<div class="pm_folder_divider">${escapeHtml(t('folder.heading'))}</div>`;
+    for (const f of folders) html += folderRowHtml(f.id, f.name, 'fa-folder');
+    html += `</div>`;
+    el.innerHTML = html;
+}
+
+function applyFolderLayout() {
+    const content = state.dom.content;
+    if (!content) return;
+    content.classList.toggle('has-folders', hasFolders());
+}
+
+async function refresh({ reloadList = false } = {}) {
+    if (reloadList) await loadAvatars(true);
+    else await loadAvatars(false);
+    applyFolderLayout();
+    renderSidebar();
+    renderSpotlight();
+    renderGrid();
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────
+async function selectPersona(avatarId) {
+    state.selectedId = avatarId;
+    await setUserAvatar(avatarId);
+    // PERSONA_CHANGED event will trigger a refresh.
+    renderGrid();
+}
+
+async function toggleLock(type) {
+    const on = !isPersonaLocked(type);
+    await setPersonaLockState(on, type);
+    renderSpotlight();
+    renderGrid();
+}
+
+// ── Native bridge (operations not exported by personas.js) ────────────────
+/**
+ * Delete a persona by driving ST's own delete API. Uses the avatars endpoint
+ * directly + clears power_user entries, mirroring core deletePersona, then lets
+ * the PERSONA_DELETED reload path refresh us.
+ */
+async function deletePersonaViaNative(avatarId) {
+    const ctx = getContext();
+    try {
+        const res = await fetch('/api/avatars/delete', {
+            method: 'POST',
+            headers: ctx.getRequestHeaders(),
+            body: JSON.stringify({ avatar: avatarId }),
+        });
+        if (!res.ok) return false;
+        delete power_user.personas[avatarId];
+        delete power_user.persona_descriptions[avatarId];
+        if (power_user.default_persona === avatarId) power_user.default_persona = null;
+        // Clean our own metadata too.
+        const s = getSettings();
+        delete s.assignments[avatarId];
+        const fi = s.favorites.indexOf(avatarId);
+        if (fi >= 0) s.favorites.splice(fi, 1);
+        saveSettings();
+        ctx.saveSettingsDebounced();
+        await eventSource.emit(event_types.PERSONA_DELETED, { avatarId, name: '' });
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+// ── Backup / Restore (ZIP: personas.json + persona-images/) ───────────────
+// Uses ST's bundled JSZip (local only, no CDN), matching background/backup
+// manager conventions. The archive holds the native persona JSON shape plus
+// each persona's avatar image so a restore can re-upload the photos (native
+// backup is JSON-only).
+
+let _zipReady = false;
+async function ensureZip() {
+    if (_zipReady && window.JSZip) return true;
+    if (window.JSZip) { _zipReady = true; return true; }
+    const ok = await new Promise((resolve) => {
+        const s = document.createElement('script');
+        s.src = '/lib/jszip.min.js';
+        s.onload = () => resolve(true);
+        s.onerror = () => resolve(false);
+        document.head.appendChild(s);
+    });
+    if (ok && window.JSZip) { _zipReady = true; return true; }
+    return false;
+}
+
+function downloadBlob(blob, name) {
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
+}
+
+function backupStamp() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}-${p(d.getMinutes())}`;
+}
+
+// Circular progress overlay shown during export/import (r=19 → C≈119.38).
+const PROGRESS_CIRC = 2 * Math.PI * 19;
+
+function showProgress(label) {
+    const d = state.dom;
+    if (!d.progress) return;
+    if (d.progressArc) {
+        d.progressArc.style.strokeDasharray = String(PROGRESS_CIRC);
+        d.progressArc.style.strokeDashoffset = String(PROGRESS_CIRC);
+    }
+    if (d.progressPct) d.progressPct.textContent = '0%';
+    if (d.progressLabel) d.progressLabel.textContent = label || '';
+    d.progress.classList.remove('pm_hidden');
+}
+
+function setProgress(done, total, label) {
+    const d = state.dom;
+    if (!d.progress) return;
+    const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+    if (d.progressArc) d.progressArc.style.strokeDashoffset = String(PROGRESS_CIRC * (1 - pct / 100));
+    if (d.progressPct) d.progressPct.textContent = `${pct}%`;
+    if (label && d.progressLabel) d.progressLabel.textContent = label;
+}
+
+function hideProgress() {
+    state.dom.progress?.classList.add('pm_hidden');
+}
+
+// Yield to the event loop so the progress UI can paint between steps.
+function nextFrame() {
+    return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+async function onBackup() {
+    if (state.busy) return;
+    if (!(await ensureZip())) { toastr.error(t('backup.noZip')); return; }
+    const ctx = getContext();
+    const ids = await loadAvatars(true);
+    if (!ids.length) { toastr.info(t('backup.empty')); return; }
+    state.busy = true;
+
+    const zip = new window.JSZip();
+    zip.file('personas/personas.json', JSON.stringify({
+        kind: 'personas-backup',
+        schema: 1,
+        count: ids.length,
+        default_persona: power_user.default_persona ?? null,
+        personas: power_user.personas,
+        persona_descriptions: power_user.persona_descriptions,
+    }, null, 2));
+
+    showProgress(t('backup.progressExport'));
+    try {
+        let imgFail = 0;
+        const images = zip.folder('persona-images');
+        for (let i = 0; i < ids.length; i++) {
+            const id = ids[i];
+            try {
+                const path = getUserAvatar(id).split('/').map(encodeURIComponent).join('/');
+                const r = await fetch(`/${path}`, { headers: ctx.getRequestHeaders(), cache: 'no-cache' });
+                if (!r.ok) throw new Error(`fetch ${r.status}`);
+                images.file(id, await r.blob());
+            } catch (_) { imgFail++; }
+            // Image collection occupies the first 90% of the bar.
+            setProgress(Math.round((i + 1) / ids.length * 90), 100);
+            if (i % 5 === 0) await nextFrame();
+        }
+
+        const blob = await zip.generateAsync(
+            { type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } },
+            (meta) => setProgress(90 + Math.round(meta.percent * 0.1), 100, t('backup.progressZip')),
+        );
+        downloadBlob(blob, `personas-${backupStamp()}.zip`);
+        if (imgFail) toastr.warning(t('backup.exportedPartial', { n: imgFail }));
+        else toastr.success(t('backup.exported', { n: ids.length }));
+    } finally {
+        hideProgress();
+        state.busy = false;
+    }
+}
+
+async function uploadAvatarBlob(avatarId, blob) {
+    const ctx = getContext();
+    const form = new FormData();
+    form.append('avatar', blob, 'avatar.png');
+    form.append('overwrite_name', avatarId);
+    const res = await fetch('/api/avatars/upload', {
+        method: 'POST',
+        headers: ctx.getRequestHeaders({ omitContentType: true }),
+        cache: 'no-cache',
+        body: form,
+    });
+    if (!res.ok) throw new Error(`upload ${res.status}`);
+}
+
+async function onRestoreFile(file) {
+    if (!file || state.busy) return;
+    if (!(await ensureZip())) { toastr.error(t('backup.noZip')); return; }
+    const ctx = getContext();
+
+    let zip;
+    try {
+        zip = await window.JSZip.loadAsync(file);
+    } catch (_) { toastr.error(t('backup.invalid')); return; }
+
+    const jsonFile = zip.file('personas/personas.json');
+    if (!jsonFile) { toastr.error(t('backup.invalid')); return; }
+
+    let data;
+    try {
+        data = JSON.parse(await jsonFile.async('string'));
+    } catch (_) { toastr.error(t('backup.invalid')); return; }
+
+    if (!data || typeof data.personas !== 'object' || typeof data.persona_descriptions !== 'object') {
+        toastr.error(t('backup.invalid'));
+        return;
+    }
+
+    let added = 0;
+    let skipped = 0;
+    let imgFail = 0;
+
+    state.busy = true;
+    showProgress(t('backup.progressImport'));
+    try {
+        const entries = Object.entries(data.personas);
+        for (let i = 0; i < entries.length; i++) {
+            const [id, name] = entries[i];
+            if (id in power_user.personas) { skipped++; }
+            else {
+                // Upload the bundled image first so the avatar id resolves on the server.
+                const imgFile = zip.file(`persona-images/${id}`);
+                if (imgFile) {
+                    try { await uploadAvatarBlob(id, await imgFile.async('blob')); } catch (_) { imgFail++; }
+                }
+                power_user.personas[id] = name;
+                const desc = data.persona_descriptions[id];
+                if (desc && typeof desc === 'object') power_user.persona_descriptions[id] = desc;
+                added++;
+            }
+            setProgress(i + 1, entries.length);
+            if (i % 5 === 0) await nextFrame();
+        }
+
+        saveSettings();
+        ctx.saveSettingsDebounced();
+        if (added) {
+            state.avatars = null;
+            await eventSource.emit(event_types.PERSONA_CREATED, { avatarId: '', name: '' });
+            if (state.isOpen) await refresh({ reloadList: true });
+        }
+
+        if (imgFail) toastr.warning(t('backup.restoredPartial', { n: added, f: imgFail }));
+        else toastr.success(t('backup.restored', { n: added, skipped }));
+    } finally {
+        hideProgress();
+        state.busy = false;
+    }
+}
+
+// ── Per-card actions ──────────────────────────────────────────────────────
+async function onCardAction(action, avatarId) {
+    switch (action) {
+        case 'edit':
+            openEditor(avatarId);
+            break;
+        case 'move': {
+            const folderId = await pickFolder();
+            if (folderId === undefined) return;
+            assignToFolder(avatarId, folderId);
+            renderSidebar();
+            renderGrid();
+            break;
+        }
+        case 'remove':
+            assignToFolder(avatarId, FOLDER_UNFILED);
+            renderSidebar();
+            renderGrid();
+            break;
+        case 'delete': {
+            const ctx = getContext();
+            const name = power_user.personas?.[avatarId] || '';
+            const ok = await ctx.Popup.show.confirm(t('card.delete'), t('card.deleteConfirm', { name }));
+            if (!ok) return;
+            await deletePersonaViaNative(avatarId);
+            await refresh({ reloadList: true });
+            break;
+        }
+    }
+}
+
+// ── Editor (master-detail, 3rd column) ────────────────────────────────────
+/** Get-or-create the full descriptor object for a persona id. */
+function getDescriptor(avatarId) {
+    let obj = power_user.persona_descriptions[avatarId];
+    if (!obj) {
+        obj = { description: '', position: POS.IN_PROMPT, depth: DEFAULT_DEPTH, role: DEFAULT_ROLE, lorebook: '', title: '', connections: [] };
+        power_user.persona_descriptions[avatarId] = obj;
+    }
+    if (!Array.isArray(obj.connections)) obj.connections = [];
+    return obj;
+}
+
+/**
+ * Mirror a descriptor change to the live prompt fields when editing the active
+ * persona, so the prompt updates immediately (matches core behaviour). Native
+ * panel sync is delegated to setPersonaDescription if available.
+ */
+function syncActiveMirror(avatarId, obj) {
+    if (avatarId !== user_avatar) return;
+    power_user.persona_description = obj.description ?? '';
+    power_user.persona_description_position = obj.position ?? POS.IN_PROMPT;
+    power_user.persona_description_depth = obj.depth ?? DEFAULT_DEPTH;
+    power_user.persona_description_role = obj.role ?? DEFAULT_ROLE;
+    power_user.persona_description_lorebook = obj.lorebook ?? '';
+    try { getContext().setPersonaDescription?.(); } catch (_) { /* ignore */ }
+}
+
+/** Persist a descriptor edit and notify ST (without clobbering our own inputs). */
+async function commitDescriptor(avatarId, obj) {
+    syncActiveMirror(avatarId, obj);
+    saveSettings();
+    state.suppressEditorRerender = true;
+    try {
+        await eventSource.emit(event_types.PERSONA_UPDATED, avatarId);
+    } finally {
+        state.suppressEditorRerender = false;
+    }
+}
+
+function openEditor(avatarId) {
+    state.editorId = avatarId;
+    state.dom.content?.classList.add('pm-editing');
+    state.dom.editor?.classList.remove('pm_hidden');
+    renderEditor();
+}
+
+function closeEditor() {
+    state.editorId = null;
+    setEditorMaximized(false);
+    state.dom.content?.classList.remove('pm-editing');
+    state.dom.editor?.classList.add('pm_hidden');
+}
+
+/**
+ * Expand the editor to fill the whole modal (over the grid/sidebar). Kept
+ * separate from CodeMirror Pro's own fullscreen so the two coexist: CMP wraps
+ * the description textarea inside its own dialog and toggles that independently.
+ */
+function setEditorMaximized(on) {
+    state.editorMaximized = on;
+    state.dom.modal?.classList.toggle('pm-editor-max', on);
+    const btn = state.dom.editorExpand;
+    if (btn) {
+        const icon = btn.querySelector('i');
+        if (icon) icon.className = on ? 'fa-solid fa-compress' : 'fa-solid fa-expand';
+        btn.classList.toggle('is-on', on);
+        const label = t(on ? 'editor.collapse' : 'editor.expand');
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+        btn.setAttribute('aria-pressed', String(on));
+    }
+}
+
+async function updateTokenBar(text) {
+    if (!state.dom.tokenNum) return;
+    let count = 0;
+    try {
+        const fn = getContext().getTokenCountAsync;
+        if (typeof fn === 'function') count = await fn(text || '');
+    } catch (_) { /* ignore */ }
+    // Stale-guard: only apply if the editor is still showing the same text.
+    if (state.dom.fDesc && state.dom.fDesc.value !== (text || '')) return;
+    state.dom.tokenNum.textContent = String(count);
+    const pct = Math.min(100, Math.round((count / TOKEN_WARN) * 100));
+    state.dom.tokenFill.style.width = `${pct}%`;
+    state.dom.tokenFill.classList.toggle('is-warn', count > TOKEN_WARN);
+}
+
+function renderConnectionList(obj) {
+    const el = state.dom.connList;
+    if (!el) return;
+    const ctx = getContext();
+    const chars = ctx.characters || [];
+    const groups = ctx.groups || [];
+    const conns = Array.isArray(obj.connections) ? obj.connections : [];
+    const items = [];
+    for (const c of conns) {
+        if (c.type === 'character') {
+            const ch = chars.find((x) => x.avatar === c.id);
+            if (ch) items.push({ name: ch.name, img: ctx.getThumbnailUrl ? ctx.getThumbnailUrl('avatar', ch.avatar) : '' });
+        } else if (c.type === 'group') {
+            const g = groups.find((x) => String(x.id) === String(c.id));
+            if (g) items.push({ name: g.name, img: '' });
+        }
+    }
+    if (!items.length) {
+        el.innerHTML = `<span class="pm_conn_empty">${escapeHtml(t('editor.noConnections'))}</span>`;
+        return;
+    }
+    el.innerHTML = items.map((i) => `
+        <span class="pm_conn_avatar" title="${escapeHtml(i.name)}">
+            ${i.img ? `<img src="${escapeHtml(i.img)}" alt="${escapeHtml(i.name)}" onerror="this.style.display='none';" />` : `<i class="fa-solid fa-user-group"></i>`}
+        </span>`).join('');
+}
+
+function renderEditor() {
+    const id = state.editorId;
+    if (!id || !state.dom.editor) return;
+    const meta = personaMeta(id);
+    const obj = getDescriptor(id);
+    const isActive = id === user_avatar;
+
+    state.dom.editorImg.src = personaImageUrl(id);
+    state.dom.editorImg.onerror = function () { this.onerror = null; this.src = FALLBACK_AVATAR_URL; };
+    state.dom.editorName.textContent = meta.name;
+    state.dom.editorSubtitle.textContent = meta.title || '';
+
+    state.dom.fTitle.value = meta.title || '';
+    state.dom.fDesc.value = obj.description || '';
+    state.dom.fPosition.value = String(obj.position ?? POS.IN_PROMPT);
+    state.dom.fDepth.value = obj.depth ?? DEFAULT_DEPTH;
+    state.dom.fRole.value = String(obj.role ?? DEFAULT_ROLE);
+    state.dom.depthWrap.classList.toggle('pm_hidden', Number(obj.position) !== POS.AT_DEPTH);
+    state.dom.fNotes.value = getSettings().notes?.[id] || '';
+
+    // Lorebook options.
+    const sel = state.dom.fLorebook;
+    sel.innerHTML = '';
+    sel.appendChild(new Option(t('editor.lorebook.none'), ''));
+    for (const w of (world_names || [])) sel.appendChild(new Option(w, w));
+    sel.value = obj.lorebook || '';
+
+    // Default button highlight.
+    state.dom.opDefault.classList.toggle('is-on', power_user.default_persona === id);
+
+    // Locks: only meaningful for the active persona.
+    state.dom.connLocks.classList.toggle('is-disabled', !isActive);
+    state.dom.connHint.classList.toggle('pm_hidden', isActive);
+    state.dom.connLocks.querySelectorAll('[data-pm-lock]').forEach((btn) => {
+        const type = btn.getAttribute('data-pm-lock');
+        btn.disabled = !isActive;
+        btn.classList.toggle('is-on', isActive && isPersonaLocked(type));
+    });
+
+    renderConnectionList(obj);
+    updateTokenBar(obj.description || '');
+}
+
+async function onEditorImagePicked(file) {
+    const id = state.editorId;
+    if (!id || !file) return;
+    const ctx = getContext();
+    try {
+        const form = new FormData();
+        form.append('avatar', file, 'avatar.png');
+        form.append('overwrite_name', id);
+        const res = await fetch('/api/avatars/upload', {
+            method: 'POST',
+            headers: ctx.getRequestHeaders({ omitContentType: true }),
+            cache: 'no-cache',
+            body: form,
+        });
+        if (!res.ok) throw new Error(`upload ${res.status}`);
+        // Cache-bust the avatar + thumbnail, then re-render.
+        await fetch(`/${getUserAvatar(id).split('/').map(encodeURIComponent).join('/')}`, { cache: 'reload' }).catch(() => {});
+        renderEditor();
+        await refresh({ reloadList: true });
+    } catch (_) {
+        toastr.error(t('editor.imageError'));
+    }
+}
+
+async function onEditorDuplicate() {
+    const id = state.editorId;
+    if (!id) return;
+    const ctx = getContext();
+    const name = power_user.personas[id] || '';
+    const ok = await ctx.Popup.show.confirm(t('editor.duplicate'), t('editor.duplicateConfirm', { name }));
+    if (!ok) return;
+    const newId = `${Date.now()}-${name.replace(/[^a-zA-Z0-9]/g, '')}.png`;
+    const src = getDescriptor(id);
+    try {
+        power_user.personas[newId] = name;
+        power_user.persona_descriptions[newId] = {
+            description: src.description ?? '',
+            position: src.position ?? POS.IN_PROMPT,
+            depth: src.depth ?? DEFAULT_DEPTH,
+            role: src.role ?? DEFAULT_ROLE,
+            lorebook: src.lorebook ?? '',
+            title: src.title ?? '',
+            connections: [],
+        };
+        // Copy the avatar image server-side via re-upload of the source file.
+        const blob = await (await fetch(`/${getUserAvatar(id).split('/').map(encodeURIComponent).join('/')}`)).blob();
+        const form = new FormData();
+        form.append('avatar', blob, 'avatar.png');
+        form.append('overwrite_name', newId);
+        const res = await fetch('/api/avatars/upload', {
+            method: 'POST',
+            headers: ctx.getRequestHeaders({ omitContentType: true }),
+            cache: 'no-cache',
+            body: form,
+        });
+        if (!res.ok) throw new Error(`upload ${res.status}`);
+        saveSettings();
+        ctx.saveSettingsDebounced();
+        await eventSource.emit(event_types.PERSONA_CREATED, { avatarId: newId, name, description: src.description ?? '', title: src.title ?? '' });
+        await refresh({ reloadList: true });
+        openEditor(newId);
+    } catch (_) {
+        delete power_user.personas[newId];
+        delete power_user.persona_descriptions[newId];
+        toastr.error(t('editor.duplicateError'));
+    }
+}
+
+async function onEditorRename() {
+    const id = state.editorId;
+    if (!id) return;
+    const ctx = getContext();
+    const current = power_user.personas[id] || '';
+    const name = await ctx.Popup.show.input(t('editor.rename'), t('editor.renamePrompt'), current);
+    if (!name || !name.trim() || name === current) return;
+    power_user.personas[id] = name.trim();
+    if (id === user_avatar) setUserName(name.trim());
+    saveSettings();
+    await eventSource.emit(event_types.PERSONA_RENAMED, { avatarId: id, oldName: current, newName: name.trim() });
+    await refresh({ reloadList: true });
+    renderEditor();
+}
+
+async function onEditorSetDefault() {
+    const id = state.editorId;
+    if (!id) return;
+    power_user.default_persona = power_user.default_persona === id ? null : id;
+    saveSettings();
+    await eventSource.emit(event_types.PERSONA_UPDATED, id);
+    renderEditor();
+    renderGrid();
+    renderSidebar();
+}
+
+async function onEditorDelete() {
+    const id = state.editorId;
+    if (!id) return;
+    const ctx = getContext();
+    const name = power_user.personas?.[id] || '';
+    const ok = await ctx.Popup.show.confirm(t('card.delete'), t('card.deleteConfirm', { name }));
+    if (!ok) return;
+    await deletePersonaViaNative(id);
+    closeEditor();
+    await refresh({ reloadList: true });
+}
+
+/** Wire editor field + action listeners (called once when the DOM is built). */
+function bindEditorEvents() {
+    const d = state.dom;
+    if (!d.editor) return;
+
+    d.editorClose?.addEventListener('click', closeEditor);
+    d.editorBack?.addEventListener('click', closeEditor);
+    d.editorExpand?.addEventListener('click', () => setEditorMaximized(!state.editorMaximized));
+
+    d.fTitle?.addEventListener('input', () => {
+        const id = state.editorId; if (!id) return;
+        const obj = getDescriptor(id);
+        obj.title = d.fTitle.value;
+        d.editorSubtitle.textContent = obj.title;
+        commitDescriptor(id, obj);
+    });
+
+    let descTimer = null;
+    d.fDesc?.addEventListener('input', () => {
+        const id = state.editorId; if (!id) return;
+        const obj = getDescriptor(id);
+        obj.description = d.fDesc.value;
+        updateTokenBar(obj.description);
+        clearTimeout(descTimer);
+        descTimer = setTimeout(() => commitDescriptor(id, obj), 300);
+    });
+
+    d.fPosition?.addEventListener('change', () => {
+        const id = state.editorId; if (!id) return;
+        const obj = getDescriptor(id);
+        obj.position = Number(d.fPosition.value);
+        d.depthWrap.classList.toggle('pm_hidden', obj.position !== POS.AT_DEPTH);
+        commitDescriptor(id, obj);
+    });
+
+    d.fDepth?.addEventListener('input', () => {
+        const id = state.editorId; if (!id) return;
+        const obj = getDescriptor(id);
+        obj.depth = Number(d.fDepth.value);
+        commitDescriptor(id, obj);
+    });
+
+    d.fRole?.addEventListener('change', () => {
+        const id = state.editorId; if (!id) return;
+        const obj = getDescriptor(id);
+        obj.role = Number(d.fRole.value);
+        commitDescriptor(id, obj);
+    });
+
+    d.fLorebook?.addEventListener('change', () => {
+        const id = state.editorId; if (!id) return;
+        const obj = getDescriptor(id);
+        obj.lorebook = d.fLorebook.value;
+        commitDescriptor(id, obj);
+    });
+
+    d.loreOpen?.addEventListener('click', () => {
+        const name = d.fLorebook?.value;
+        if (name) openWorldInfoEditor(name);
+    });
+
+    d.fNotes?.addEventListener('input', () => {
+        const id = state.editorId; if (!id) return;
+        const s = getSettings();
+        if (d.fNotes.value) s.notes[id] = d.fNotes.value;
+        else delete s.notes[id];
+        saveSettings();
+    });
+
+    // Connection locks (active persona only).
+    d.connLocks?.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-pm-lock]');
+        if (!btn || btn.disabled) return;
+        toggleLock(btn.getAttribute('data-pm-lock')).then(renderEditor);
+    });
+
+    d.opRename?.addEventListener('click', onEditorRename);
+    d.opDuplicate?.addEventListener('click', onEditorDuplicate);
+    d.opDefault?.addEventListener('click', onEditorSetDefault);
+    d.opDelete?.addEventListener('click', onEditorDelete);
+    d.opImage?.addEventListener('click', () => d.imageInput?.click());
+    d.imageInput?.addEventListener('change', () => {
+        const file = d.imageInput.files?.[0];
+        d.imageInput.value = '';
+        if (file) onEditorImagePicked(file);
+    });
+}
+
+// ── Selection / bulk actions ──────────────────────────────────────────────
+function setSelectMode(on) {
+    state.selectMode = on;
+    if (!on) state.selected.clear();
+    state.dom.modal.classList.toggle('pm_selecting', on);
+    renderGrid();
+}
+
+function toggleSelection(avatarId) {
+    if (state.selected.has(avatarId)) state.selected.delete(avatarId);
+    else state.selected.add(avatarId);
+    updateSelectUI();
+    const card = state.dom.grid.querySelector(`.pm_card[data-avatar-id="${CSS.escape(avatarId)}"]`);
+    if (card) {
+        card.classList.toggle('is-selected', state.selected.has(avatarId));
+        const icon = card.querySelector('.pm_card_check i');
+        if (icon) icon.className = state.selected.has(avatarId) ? 'fa-solid fa-square-check' : 'fa-regular fa-square';
+    }
+}
+
+function updateSelectUI() {
+    const count = state.selected.size;
+    state.dom.selectBar?.classList.toggle('pm_hidden', count === 0);
+    if (state.dom.selectCount) state.dom.selectCount.textContent = t('select.count', { n: count });
+}
+
+function selectAllVisible() {
+    for (const p of getVisiblePersonas()) state.selected.add(p.id);
+    renderGrid();
+}
+
+async function bulkDelete() {
+    const ids = [...state.selected];
+    if (!ids.length) return;
+    const ctx = getContext();
+    const ok = await ctx.Popup.show.confirm(t('select.delete'), t('select.deleteConfirm', { n: ids.length }));
+    if (!ok) return;
+    for (const id of ids) await deletePersonaViaNative(id);
+    state.selected.clear();
+    setSelectMode(false);
+    await refresh({ reloadList: true });
+}
+
+async function bulkMove() {
+    const ids = [...state.selected];
+    if (!ids.length) return;
+    const folderId = await pickFolder();
+    if (folderId === undefined) return;
+    for (const id of ids) assignToFolder(id, folderId);
+    state.selected.clear();
+    setSelectMode(false);
+    renderSidebar();
+    renderGrid();
+}
+
+function bulkFavorite() {
+    const ids = [...state.selected];
+    if (!ids.length) return;
+    const allFav = ids.every(isFavorite);
+    for (const id of ids) {
+        if (allFav && isFavorite(id)) toggleFavorite(id);
+        else if (!allFav && !isFavorite(id)) toggleFavorite(id);
+    }
+    state.selected.clear();
+    setSelectMode(false);
+    renderSidebar();
+    renderGrid();
+}
+
+/**
+ * Folder picker — a select dropdown inside a CONFIRM popup (background-manager
+ * pattern). Returns the chosen folder id, FOLDER_UNFILED, or undefined if
+ * cancelled.
+ */
+async function pickFolder() {
+    const ctx = getContext();
+    const Popup = ctx.Popup;
+    const POPUP_TYPE = ctx.POPUP_TYPE;
+
+    const container = document.createElement('div');
+    const label = document.createElement('label');
+    label.style.display = 'block';
+    label.style.marginBottom = '6px';
+    label.textContent = t('folder.pickPrompt');
+    const select = document.createElement('select');
+    select.className = 'text_pole';
+    select.style.width = '100%';
+    select.appendChild(new Option(t('folder.unfiled'), FOLDER_UNFILED));
+    getSettings().folders
+        .slice()
+        .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+        .forEach((f) => select.appendChild(new Option(f.name, f.id)));
+    container.append(label, select);
+
+    const instance = new Popup(container, POPUP_TYPE?.CONFIRM ?? 2, '', {
+        okButton: t('select.move'),
+        cancelButton: t('select.cancel'),
+    });
+    const result = await instance.show();
+    const affirmative = ctx.POPUP_RESULT?.AFFIRMATIVE ?? 1;
+    if (result !== affirmative && result !== true) return undefined;
+    return select.value;
+}
+
+async function onNewFolder() {
+    const ctx = getContext();
+    const name = await ctx.Popup.show.input(t('folder.new'), t('folder.namePrompt'), '');
+    if (!name || !name.trim()) return;
+    const folder = createFolder(name);
+    state.activeFolderId = folder.id;
+    applyFolderLayout();
+    renderSidebar();
+    renderGrid();
+}
+
+async function onRenameFolder(folderId) {
+    const ctx = getContext();
+    const folder = getSettings().folders.find((f) => f.id === folderId);
+    if (!folder) return;
+    const name = await ctx.Popup.show.input(t('folder.rename'), t('folder.namePrompt'), folder.name);
+    if (!name || !name.trim()) return;
+    renameFolder(folderId, name);
+    renderSidebar();
+}
+
+async function onDeleteFolder(folderId) {
+    const ctx = getContext();
+    const folder = getSettings().folders.find((f) => f.id === folderId);
+    if (!folder) return;
+    const ok = await ctx.Popup.show.confirm(t('folder.delete'), t('folder.deleteConfirm', { name: folder.name }));
+    if (!ok) return;
+    deleteFolder(folderId);
+    applyFolderLayout();
+    renderSidebar();
+    renderGrid();
+}
+
+// ── Drag & drop (assign personas to folders) ──────────────────────────────
+function bindDragAndDrop() {
+    const { grid, sidebar } = state.dom;
+    if (!grid || !sidebar) return;
+
+    grid.addEventListener('dragstart', (e) => {
+        const card = e.target.closest('.pm_card');
+        if (!card) return;
+        state.dragId = card.dataset.avatarId;
+        card.classList.add('is-dragging');
+        try { e.dataTransfer.setData('text/pm-avatar', state.dragId); } catch (_) { /* ignore */ }
+        e.dataTransfer.effectAllowed = 'move';
+    });
+
+    grid.addEventListener('dragend', (e) => {
+        e.target.closest('.pm_card')?.classList.remove('is-dragging');
+        state.dragId = null;
+        sidebar.querySelectorAll('.is-drop-target').forEach((el) => el.classList.remove('is-drop-target'));
+    });
+
+    sidebar.addEventListener('dragover', (e) => {
+        const row = e.target.closest('[data-folder-id]');
+        if (!row || !state.dragId) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (!row.classList.contains('is-drop-target')) {
+            sidebar.querySelectorAll('.is-drop-target').forEach((el) => el.classList.remove('is-drop-target'));
+            row.classList.add('is-drop-target');
+        }
+    });
+
+    sidebar.addEventListener('dragleave', (e) => {
+        const row = e.target.closest('[data-folder-id]');
+        if (row && !row.contains(e.relatedTarget)) row.classList.remove('is-drop-target');
+    });
+
+    sidebar.addEventListener('drop', (e) => {
+        const row = e.target.closest('[data-folder-id]');
+        if (!row || !state.dragId) return;
+        e.preventDefault();
+        const target = row.getAttribute('data-folder-id');
+        if (target === FOLDER_FAVORITES) {
+            if (!isFavorite(state.dragId)) toggleFavorite(state.dragId);
+        } else if (target === FOLDER_ALL || target === FOLDER_UNFILED) {
+            assignToFolder(state.dragId, FOLDER_UNFILED);
+        } else {
+            assignToFolder(state.dragId, target);
+        }
+        row.classList.remove('is-drop-target');
+        state.dragId = null;
+        renderSidebar();
+        renderGrid();
+    });
+}
+
+// ── Modal DOM ─────────────────────────────────────────────────────────────
+async function ensureDom() {
+    if (state.dom.modal && document.body.contains(state.dom.modal)) return;
+
+    const html = await renderExtensionTemplateAsync(EXTENSION_NAME, 'manager');
+    const wrap = document.createElement('div');
+    wrap.innerHTML = html;
+    const modal = wrap.firstElementChild;
+    modal.dataset.build = buildStamp(VERSION);
+    document.body.appendChild(modal);
+    i18nApplyDom(modal);
+
+    state.dom = {
+        modal,
+        backdrop: modal.querySelector('.pm_backdrop'),
+        content: modal.querySelector('#pm_content'),
+        sidebar: modal.querySelector('#pm_sidebar'),
+        sidebarToggle: modal.querySelector('#pm_sidebar_toggle'),
+        spotlight: modal.querySelector('#pm_spotlight'),
+        search: modal.querySelector('#pm_search'),
+        sort: modal.querySelector('#pm_sort'),
+        newFolder: modal.querySelector('#pm_new_folder'),
+        selectToggle: modal.querySelector('#pm_select_toggle'),
+        selectBar: modal.querySelector('#pm_select_bar'),
+        selectCount: modal.querySelector('#pm_select_count'),
+        selectAll: modal.querySelector('#pm_select_all'),
+        selectCancel: modal.querySelector('#pm_select_cancel'),
+        bulkMove: modal.querySelector('#pm_bulk_move'),
+        bulkFav: modal.querySelector('#pm_bulk_fav'),
+        bulkDelete: modal.querySelector('#pm_bulk_delete'),
+        grid: modal.querySelector('#pm_grid'),
+        empty: modal.querySelector('#pm_empty'),
+        pager: modal.querySelector('#pm_pager'),
+        pagerPrev: modal.querySelector('#pm_pager_prev'),
+        pagerNext: modal.querySelector('#pm_pager_next'),
+        pagerLabel: modal.querySelector('#pm_pager_label'),
+        pagerRange: modal.querySelector('#pm_pager_range'),
+        backup: modal.querySelector('#pm_backup'),
+        restore: modal.querySelector('#pm_restore'),
+        restoreInput: modal.querySelector('#pm_restore_input'),
+        progress: modal.querySelector('#pm_progress'),
+        progressArc: modal.querySelector('#pm_progress_arc'),
+        progressPct: modal.querySelector('#pm_progress_pct'),
+        progressLabel: modal.querySelector('#pm_progress_label'),
+        close: modal.querySelector('#pm_close'),
+        // Editor panel
+        editor: modal.querySelector('#pm_editor'),
+        editorImg: modal.querySelector('#pm_editor_img'),
+        editorName: modal.querySelector('#pm_editor_name'),
+        editorSubtitle: modal.querySelector('#pm_editor_subtitle'),
+        editorBack: modal.querySelector('#pm_editor_back'),
+        editorExpand: modal.querySelector('#pm_editor_expand'),
+        editorClose: modal.querySelector('#pm_editor_close'),
+        fTitle: modal.querySelector('#pm_field_title'),
+        fDesc: modal.querySelector('#pm_field_desc'),
+        fPosition: modal.querySelector('#pm_field_position'),
+        depthWrap: modal.querySelector('#pm_depth_wrap'),
+        fDepth: modal.querySelector('#pm_field_depth'),
+        fRole: modal.querySelector('#pm_field_role'),
+        fLorebook: modal.querySelector('#pm_field_lorebook'),
+        fNotes: modal.querySelector('#pm_field_notes'),
+        loreOpen: modal.querySelector('#pm_lore_open'),
+        tokenFill: modal.querySelector('#pm_token_fill'),
+        tokenNum: modal.querySelector('#pm_token_num'),
+        connLocks: modal.querySelector('#pm_conn_locks'),
+        connHint: modal.querySelector('#pm_conn_hint'),
+        connList: modal.querySelector('#pm_conn_list'),
+        opRename: modal.querySelector('#pm_op_rename'),
+        opImage: modal.querySelector('#pm_op_image'),
+        opDuplicate: modal.querySelector('#pm_op_duplicate'),
+        opDefault: modal.querySelector('#pm_op_default'),
+        opDelete: modal.querySelector('#pm_op_delete'),
+        imageInput: modal.querySelector('#pm_image_input'),
+    };
+
+    bindModalEvents();
+    bindEditorEvents();
+}
+
+function bindModalEvents() {
+    const { modal, dom } = { modal: state.dom.modal, dom: state.dom };
+    if (!modal) return;
+
+    modal.addEventListener('click', (e) => {
+        const action = e.target.closest('[data-pm-action]')?.getAttribute('data-pm-action');
+        if (action === 'close') { closeManager(); return; }
+
+        const lockBtn = e.target.closest('[data-pm-lock]');
+        if (lockBtn) { toggleLock(lockBtn.getAttribute('data-pm-lock')); return; }
+
+        const checkBtn = e.target.closest('[data-pm-check]');
+        if (checkBtn) {
+            e.stopPropagation();
+            toggleSelection(checkBtn.getAttribute('data-pm-check'));
+            return;
+        }
+
+        const favBtn = e.target.closest('[data-pm-fav]');
+        if (favBtn) {
+            e.stopPropagation();
+            toggleFavorite(favBtn.getAttribute('data-pm-fav'));
+            renderSidebar();
+            renderGrid();
+            return;
+        }
+
+        const folderRename = e.target.closest('[data-folder-rename]');
+        if (folderRename) {
+            e.stopPropagation();
+            onRenameFolder(folderRename.getAttribute('data-folder-rename'));
+            return;
+        }
+
+        const folderDel = e.target.closest('[data-folder-del]');
+        if (folderDel) {
+            e.stopPropagation();
+            onDeleteFolder(folderDel.getAttribute('data-folder-del'));
+            return;
+        }
+
+        const folderRow = e.target.closest('[data-folder-id]');
+        if (folderRow) {
+            state.activeFolderId = folderRow.getAttribute('data-folder-id');
+            state.currentPage = 1;
+            renderSidebar();
+            renderGrid();
+            if (window.matchMedia('(max-width: 900px)').matches) dom.sidebar.classList.add('is-collapsed');
+            return;
+        }
+
+        const cardAction = e.target.closest('[data-pm-card]');
+        if (cardAction) {
+            e.stopPropagation();
+            const id = cardAction.closest('.pm_card')?.dataset.avatarId;
+            if (id) onCardAction(cardAction.getAttribute('data-pm-card'), id);
+            return;
+        }
+
+        const card = e.target.closest('.pm_card');
+        if (card?.dataset.avatarId) {
+            if (state.selectMode) toggleSelection(card.dataset.avatarId);
+            else selectPersona(card.dataset.avatarId);
+            return;
+        }
+    });
+
+    dom.newFolder?.addEventListener('click', onNewFolder);
+    dom.selectToggle?.addEventListener('click', () => setSelectMode(!state.selectMode));
+    dom.selectAll?.addEventListener('click', selectAllVisible);
+    dom.selectCancel?.addEventListener('click', () => setSelectMode(false));
+    dom.bulkMove?.addEventListener('click', bulkMove);
+    dom.bulkFav?.addEventListener('click', bulkFavorite);
+    dom.bulkDelete?.addEventListener('click', bulkDelete);
+
+    dom.backup?.addEventListener('click', onBackup);
+    dom.restore?.addEventListener('click', () => dom.restoreInput?.click());
+    dom.restoreInput?.addEventListener('change', () => {
+        const file = dom.restoreInput.files?.[0];
+        dom.restoreInput.value = '';
+        if (file) onRestoreFile(file);
+    });
+
+    bindDragAndDrop();
+
+    dom.sidebarToggle?.addEventListener('click', () => {
+        dom.sidebar.classList.toggle('is-collapsed');
+    });
+
+    dom.search?.addEventListener('input', () => {
+        state.search = dom.search.value;
+        state.currentPage = 1;
+        renderGrid();
+    });
+
+    dom.sort?.addEventListener('change', () => {
+        state.sort = dom.sort.value;
+        getSettings().sort = state.sort;
+        saveSettings();
+        renderGrid();
+    });
+
+    dom.pagerPrev?.addEventListener('click', () => { state.currentPage--; renderGrid(); });
+    dom.pagerNext?.addEventListener('click', () => { state.currentPage++; renderGrid(); });
+
+    document.addEventListener('keydown', onGlobalKeydown);
+}
+
+function onGlobalKeydown(e) {
+    if (e.key !== 'Escape' || !state.isOpen) return;
+    // Let an open popup/dialog (e.g. CodeMirror Pro's editor) handle Escape first.
+    if (document.querySelector('dialog.popup[open], dialog[open]')) return;
+    e.preventDefault();
+    if (state.editorMaximized) { setEditorMaximized(false); return; }
+    if (state.editorId) { closeEditor(); return; }
+    closeManager();
+}
+
+async function openManager() {
+    await ensureDom();
+    const s = getSettings();
+    state.isOpen = true;
+    state.sort = s.sort || 'az';
+    state.pageSize = Number(s.pageSize) || DEFAULT_SETTINGS.pageSize;
+    state.currentPage = 1;
+    state.dom.sort.value = state.sort;
+    state.dom.search.value = state.search;
+    state.dom.modal.classList.remove('pm_hidden');
+    collapseNativePersonaDrawer();
+    await refresh({ reloadList: true });
+}
+
+function closeManager() {
+    if (!state.dom.modal) return;
+    state.isOpen = false;
+    closeEditor();
+    state.dom.modal.classList.add('pm_hidden');
+}
+
+function collapseNativePersonaDrawer() {
+    const drawer = document.getElementById('PersonaManagement');
+    if (drawer && drawer.classList.contains('openDrawer')) {
+        state.suppressDrawerHijack = true;
+        document.querySelector('#persona-management-button .drawer-toggle')?.click();
+        state.suppressDrawerHijack = false;
+    }
+}
+
+// ── Drawer hijack ─────────────────────────────────────────────────────────
+function hijackPersonaDrawer() {
+    if (!getSettings().hijackDrawer) return;
+
+    const drawerButton = document.querySelector('#persona-management-button .drawer-toggle');
+    if (drawerButton && !drawerButton.dataset.pmHijacked) {
+        drawerButton.dataset.pmHijacked = 'true';
+        drawerButton.addEventListener('click', (e) => {
+            if (!getSettings().hijackDrawer) return;
+            if (state.suppressDrawerHijack) return; // synthetic collapse click
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            if (state.isOpen) closeManager();
+            else openManager();
+        }, true);
+    }
+}
+
+function startDrawerHijack(attempt = 0) {
+    const button = document.querySelector('#persona-management-button .drawer-toggle');
+    if (button) {
+        hijackPersonaDrawer();
+        return;
+    }
+    if (attempt >= 20) return; // ~5s of bounded retries, then give up
+    setTimeout(() => startDrawerHijack(attempt + 1), 250);
+}
+
+function wireEvents() {
+    const reRender = () => {
+        if (!state.isOpen) return;
+        renderSpotlight();
+        renderGrid();
+        if (state.editorId && !state.suppressEditorRerender) renderEditor();
+    };
+    const reload = async () => {
+        state.avatars = null;
+        if (!state.isOpen) return;
+        await refresh({ reloadList: true });
+        // The edited persona may have been deleted/renamed under us.
+        if (state.editorId) {
+            if ((state.avatars || []).includes(state.editorId)) renderEditor();
+            else closeEditor();
+        }
+    };
+    eventSource.on(event_types.PERSONA_CHANGED, reRender);
+    eventSource.on(event_types.PERSONA_UPDATED, reRender);
+    eventSource.on(event_types.PERSONA_CREATED, reload);
+    eventSource.on(event_types.PERSONA_DELETED, reload);
+    eventSource.on(event_types.PERSONA_RENAMED, reload);
+    eventSource.on(event_types.CHAT_CHANGED, reRender);
+}
+
+jQuery(async () => {
+    LANG = detectLang();
+    getSettings();
+    await injectSettingsPanel();
+    startDrawerHijack();
+    wireEvents();
+});
