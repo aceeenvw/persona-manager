@@ -2076,6 +2076,23 @@ function startDrawerHijack(attempt = 0) {
     setTimeout(() => startDrawerHijack(attempt + 1), 250);
 }
 
+// When the manager is open and the user clicks a different top-bar drawer
+// icon, close the manager so it doesn't float over the newly opened panel.
+function bindTopBarCloseHandlers() {
+    const topBar = document.getElementById('top-settings-holder');
+    if (!topBar || topBar.dataset.pmTopBarBound) return;
+    topBar.dataset.pmTopBarBound = 'true';
+
+    topBar.addEventListener('click', (e) => {
+        if (!state.isOpen) return;
+        // Our own button is handled by the drawer hijack (toggles the manager).
+        if (e.target.closest('#persona-management-button')) return;
+        // Only react to actual top-bar drawer/menu buttons.
+        if (!e.target.closest('.drawer-icon, .drawer-toggle')) return;
+        closeManager();
+    }, true); // capture phase, before ST opens the other drawer
+}
+
 function wireEvents() {
     const reRender = () => {
         if (!state.isOpen) return;
@@ -2106,5 +2123,6 @@ jQuery(async () => {
     getSettings();
     await injectSettingsPanel();
     startDrawerHijack();
+    bindTopBarCloseHandlers();
     wireEvents();
 });
