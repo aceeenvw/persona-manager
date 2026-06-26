@@ -4,6 +4,7 @@ import {
     saveSettingsDebounced,
     getThumbnailUrl,
     setUserName,
+    default_user_avatar,
 } from '../../../../script.js';
 import { extension_settings, renderExtensionTemplateAsync } from '../../../extensions.js';
 import { power_user } from '../../../power-user.js';
@@ -242,6 +243,10 @@ const I18N = {
         'convert.prompt': 'Convert which character to a persona?',
         'convert.empty': 'No characters to convert.',
         'convert.error': 'Failed to convert character to persona.',
+        'create.btn': 'Create persona',
+        'create.namePrompt': 'Enter a name for this persona:',
+        'create.nameLabel': 'Persona Title (optional, display only)',
+        'create.error': 'Failed to create persona.',
         'settings.intro': 'A prettier, mobile-first way to browse, organize and edit your personas.',
         'settings.open': 'Open Persona Manager',
         'settings.behaviorHeading': 'Behavior',
@@ -362,6 +367,10 @@ const I18N = {
         'convert.prompt': 'Какого персонажа преобразовать в персону?',
         'convert.empty': 'Нет персонажей для преобразования.',
         'convert.error': 'Не удалось преобразовать персонажа в персону.',
+        'create.btn': 'Создать персону',
+        'create.namePrompt': 'Введите имя для этой персоны:',
+        'create.nameLabel': 'Заголовок персоны (необязательно, только для отображения)',
+        'create.error': 'Не удалось создать персону.',
         'settings.intro': 'Более красивый и удобный для мобильных способ управлять персонами.',
         'settings.open': 'Открыть Менеджер Персон',
         'settings.behaviorHeading': 'Поведение',
@@ -1173,6 +1182,48 @@ async function onRestoreFile(file) {
     }
 }
 
+// ── Create persona ────────────────────────────────────────────────────────
+/**
+ * Create a blank persona: prompt for name (+ optional title), mint an avatar id,
+ * seed its descriptor, upload the default avatar image, then open the editor.
+ * Mirrors native createDummyPersona but stays inside our modal/editor flow.
+ */
+async function onCreate() {
+    if (state.busy) return;
+    const ctx = getContext();
+
+    const popup = new ctx.Popup(t('create.namePrompt'), ctx.POPUP_TYPE?.INPUT ?? 4, '', {
+        customInputs: [{ id: 'persona_title', type: 'text', label: t('create.nameLabel') }],
+    });
+    const name = await popup.show();
+    if (!name || typeof name !== 'string' || !name.trim()) return;
+    const title = String(popup.inputResults?.get('persona_title') || '').trim();
+
+    const newId = `${Date.now()}-${name.trim().replace(/[^a-zA-Z0-9]/g, '')}.png`;
+    try {
+        state.busy = true;
+        power_user.personas[newId] = name.trim();
+        power_user.persona_descriptions[newId] = {
+            description: '', position: POS.IN_PROMPT, depth: DEFAULT_DEPTH, role: DEFAULT_ROLE,
+            lorebook: '', title, connections: [],
+        };
+        const blob = await (await fetch(`/${default_user_avatar}`)).blob();
+        await uploadAvatarBlob(newId, blob);
+        saveSettings();
+        ctx.saveSettingsDebounced();
+        await eventSource.emit(event_types.PERSONA_CREATED, { avatarId: newId, name: name.trim(), description: '', title });
+        state.avatars = null;
+        await refresh({ reloadList: true });
+        openEditor(newId);
+    } catch (_) {
+        delete power_user.personas[newId];
+        delete power_user.persona_descriptions[newId];
+        toastr.error(t('create.error'));
+    } finally {
+        state.busy = false;
+    }
+}
+
 // ── Convert character → persona ───────────────────────────────────────────
 /**
  * Pick a character from a CONFIRM-popup dropdown and convert it to a persona
@@ -1847,6 +1898,7 @@ async function ensureDom() {
         restore: modal.querySelector('#pm_restore'),
         restoreInput: modal.querySelector('#pm_restore_input'),
         convert: modal.querySelector('#pm_convert'),
+        create: modal.querySelector('#pm_create'),
         progress: modal.querySelector('#pm_progress'),
         progressArc: modal.querySelector('#pm_progress_arc'),
         progressPct: modal.querySelector('#pm_progress_pct'),
@@ -1979,6 +2031,7 @@ function bindModalEvents() {
         if (file) onRestoreFile(file);
     });
     dom.convert?.addEventListener('click', onConvert);
+    dom.create?.addEventListener('click', onCreate);
 
     bindDragAndDrop();
 
