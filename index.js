@@ -1,6 +1,7 @@
 import {
     eventSource,
     event_types,
+    saveSettings as stSaveSettings,
     saveSettingsDebounced,
     getThumbnailUrl,
     setUserName,
@@ -487,6 +488,18 @@ function getSettings() {
 }
 
 function saveSettings() {
+    saveSettingsDebounced();
+}
+
+/**
+ * Force an immediate (non-debounced) settings write so edits survive a reload
+ * that happens inside the debounce window. Falls back to the debounced save if
+ * the direct call is unavailable/throws. Use at teardown/blur, NOT per keystroke.
+ */
+function flushSave() {
+    try {
+        if (typeof stSaveSettings === 'function') { stSaveSettings(); return; }
+    } catch (_) { /* fall through to debounced */ }
     saveSettingsDebounced();
 }
 
@@ -1351,6 +1364,17 @@ function openEditor(avatarId) {
 }
 
 function closeEditor() {
+    // Capture any in-progress field edit before tearing the editor down, then
+    // force a synchronous write so closing/reloading can't drop it.
+    const id = state.editorId;
+    if (id && state.dom.fDesc) {
+        const obj = getDescriptor(id);
+        if (obj.description !== state.dom.fDesc.value) {
+            obj.description = state.dom.fDesc.value;
+            commitDescriptor(id, obj);
+        }
+    }
+    flushSave();
     state.editorId = null;
     setEditorMaximized(false);
     state.dom.content?.classList.remove('pm-editing');
@@ -1582,16 +1606,32 @@ function bindEditorEvents() {
         d.editorSubtitle.textContent = obj.title;
         commitDescriptor(id, obj);
     });
+    d.fTitle?.addEventListener('blur', flushSave);
 
+    // Description uses a jQuery `input` binding (NOT addEventListener): ST's
+    // full-screen editor writes back via jQuery `.trigger('input')`, which native
+    // listeners never receive. jQuery handlers catch both real input and triggers.
     let descTimer = null;
-    d.fDesc?.addEventListener('input', () => {
-        const id = state.editorId; if (!id) return;
-        const obj = getDescriptor(id);
-        obj.description = d.fDesc.value;
-        updateTokenBar(obj.description);
-        clearTimeout(descTimer);
-        descTimer = setTimeout(() => commitDescriptor(id, obj), 300);
-    });
+    if (d.fDesc) {
+        $(d.fDesc).on('input', () => {
+            const id = state.editorId; if (!id) return;
+            const obj = getDescriptor(id);
+            obj.description = d.fDesc.value;
+            updateTokenBar(obj.description);
+            clearTimeout(descTimer);
+            descTimer = setTimeout(() => commitDescriptor(id, obj), 300);
+        });
+        // On blur, commit immediately (clearing the pending debounce) and force a
+        // synchronous write so an edit can't be lost to a reload mid-debounce.
+        $(d.fDesc).on('blur', () => {
+            const id = state.editorId; if (!id) return;
+            clearTimeout(descTimer);
+            const obj = getDescriptor(id);
+            obj.description = d.fDesc.value;
+            commitDescriptor(id, obj);
+            flushSave();
+        });
+    }
 
     d.fPosition?.addEventListener('change', () => {
         const id = state.editorId; if (!id) return;
@@ -1599,6 +1639,7 @@ function bindEditorEvents() {
         obj.position = Number(d.fPosition.value);
         d.depthWrap.classList.toggle('pm_hidden', obj.position !== POS.AT_DEPTH);
         commitDescriptor(id, obj);
+        flushSave();
     });
 
     d.fDepth?.addEventListener('input', () => {
@@ -1607,12 +1648,14 @@ function bindEditorEvents() {
         obj.depth = Number(d.fDepth.value);
         commitDescriptor(id, obj);
     });
+    d.fDepth?.addEventListener('blur', flushSave);
 
     d.fRole?.addEventListener('change', () => {
         const id = state.editorId; if (!id) return;
         const obj = getDescriptor(id);
         obj.role = Number(d.fRole.value);
         commitDescriptor(id, obj);
+        flushSave();
     });
 
     d.fLorebook?.addEventListener('change', () => {
@@ -1620,6 +1663,7 @@ function bindEditorEvents() {
         const obj = getDescriptor(id);
         obj.lorebook = d.fLorebook.value;
         commitDescriptor(id, obj);
+        flushSave();
     });
 
     d.loreOpen?.addEventListener('click', () => {
@@ -1634,6 +1678,7 @@ function bindEditorEvents() {
         else delete s.notes[id];
         saveSettings();
     });
+    d.fNotes?.addEventListener('blur', flushSave);
 
     // Connection locks (active persona only).
     d.connLocks?.addEventListener('click', (e) => {
@@ -2146,6 +2191,29 @@ function bindTopBarCloseHandlers() {
     }, true); // capture phase, before ST opens the other drawer
 }
 
+/**
+ * Safety net for abrupt reloads/navigations (especially mobile): if the editor
+ * is open with an uncommitted description edit, commit it and force an immediate
+ * write on tab hide / page unload. No-op when nothing is being edited.
+ */
+function initSaveSafetyNet() {
+    const flushIfEditing = () => {
+        const id = state.editorId;
+        if (!id || !state.dom.fDesc) return;
+        const obj = getDescriptor(id);
+        if (obj.description !== state.dom.fDesc.value) {
+            obj.description = state.dom.fDesc.value;
+            commitDescriptor(id, obj);
+        }
+        flushSave();
+    };
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') flushIfEditing();
+    });
+    window.addEventListener('pagehide', flushIfEditing);
+    window.addEventListener('beforeunload', flushIfEditing);
+}
+
 function wireEvents() {
     const reRender = () => {
         if (!state.isOpen) return;
@@ -2178,4 +2246,5 @@ jQuery(async () => {
     startDrawerHijack();
     bindTopBarCloseHandlers();
     wireEvents();
+    initSaveSafetyNet();
 });
