@@ -1,0 +1,13 @@
+{
+    "display_name": "⊹ PERSONA MANAGER ⊹",
+    "loading_order": 35,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "aceenvw",
+    "version": "1.0.0",
+    "license": "AGPL-3.0-or-later",
+    "homePage": "https://github.com/aceeenvw/persona-manager",
+    "auto_update": true
+}
