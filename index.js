@@ -15,13 +15,13 @@ import {
     setUserAvatar,
     user_avatar,
     isPersonaLocked,
-    setPersonaLockState,
+    togglePersonaLock,
     convertCharacterToPersona,
 } from '../../../personas.js';
 import { world_names, openWorldInfoEditor } from '../../../world-info.js';
 import { isFirefox } from '../../../browser-fixes.js';
 
-const VERSION = '1.1.0';
+const VERSION = '1.1.1';
 const MODULE_SETTINGS_KEY = 'aevPersonaManager';
 
 // ── Signature (aceenvw) ───────────────────────────────────────────────────
@@ -1058,10 +1058,10 @@ function recordPersonaUse(avatarId) {
 }
 
 async function toggleLock(type) {
-    const on = !isPersonaLocked(type);
-    await setPersonaLockState(on, type);
+    await togglePersonaLock(type);
     renderSpotlight();
     renderGrid();
+    if (state.editorId) renderEditor();
 }
 
 // ── Native bridge (operations not exported by personas.js) ────────────────
@@ -1874,7 +1874,7 @@ function bindEditorEvents() {
         const btn = e.target.closest('[data-pm-lock]');
         if (!btn || btn.disabled) return;
         e.stopPropagation();
-        toggleLock(btn.getAttribute('data-pm-lock')).then(renderEditor);
+        toggleLock(btn.getAttribute('data-pm-lock'));
     });
 
     d.opRename?.addEventListener('click', onEditorRename);

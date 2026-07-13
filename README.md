@@ -12,7 +12,8 @@ for browsing, organizing and editing your personas.
   default badges, favorites, and per-card actions (edit / move / remove / delete).
 - **Quick filters** for active, default, locked, favorite, and unsorted personas,
   plus **Recently used** sorting.
-- **Active-persona spotlight** with live lock toggles (chat / character / default).
+- **Active-persona spotlight** with native SillyTavern lock controls for the current
+  chat, character or group, and default persona.
 - **Folders** (virtual), **favorites**, drag-and-drop assignment, and bulk-select
   actions (move / favorite / export / delete).
 - **Full editor** — title, description with a token-budget bar, position / depth /
