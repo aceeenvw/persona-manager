@@ -21,8 +21,8 @@ for browsing, organizing and editing your personas.
   (open in the World Info editor), and private notes (never sent to the model).
 - **Rename / duplicate / change image / set default / delete** per persona.
 - **Duplicate-description warning** for exact matches, shown without blocking edits.
-- **Two full-screen modes** — maximize the editor panel, and a per-description
-  full-screen that coexists with CodeMirror Pro.
+- **Two focused editing modes** — a true full-viewport persona editor on any screen,
+  plus CodeMirror Pro's independent full-screen description editor.
 - **Grid size** (small / medium / large) and **pagination** (10 / 30 / 60 / 100).
 - **Backup / Restore** the whole library as a ZIP (personas + photos), and
   **Export** a selected subset from the bulk-select bar.
@@ -31,8 +31,8 @@ for browsing, organizing and editing your personas.
   Dracula, Solarized Dark, and Nord. Pick from the extension settings or the in-modal
   palette button.
 - **Mobile-first** — full-screen takeover, an overlay folder sidebar, a full-screen
-  editor with a back button, responsive card density, touch-friendly targets, and
-  a compact More menu for secondary actions.
+  editor that opens automatically with a back button, responsive card density,
+  touch-friendly targets, and a compact More menu for secondary actions.
 - **Bilingual UI** — English and Russian.
 
 ## Installation

@@ -1136,14 +1136,60 @@
     color: var(--pm-accent);
 }
 
-/* Maximized: editor fills the whole content area over grid + sidebar. */
+/* Fullscreen: the editor becomes the entire viewport workspace. */
+.pm_modal.pm-editor-max .pm_panel {
+    width: 100dvw;
+    height: 100dvh;
+    max-width: 100dvw;
+    max-height: 100dvh;
+    margin: 0;
+    padding: 0;
+    gap: 0;
+    border: 0;
+    border-radius: 0;
+}
+
+.pm-editor-max .pm_header,
+.pm-editor-max .pm_spotlight,
+.pm-editor-max .pm_toolbar,
+.pm-editor-max .pm_filters,
+.pm-editor-max .pm_select_bar,
+.pm-editor-max .pm_main,
+.pm-editor-max .pm_sidebar {
+    display: none !important;
+}
+
+.pm-editor-max .pm_content {
+    display: block;
+    min-height: 0;
+}
+
 .pm-editor-max .pm_editor {
     position: absolute;
     inset: 0;
     z-index: 7;
-    border-radius: 14px;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+    opacity: 1;
+    transform: none;
 }
 
+.pm-editor-max .pm_editor_head {
+    padding-top: max(10px, env(safe-area-inset-top));
+    padding-right: max(12px, env(safe-area-inset-right));
+    padding-left: max(12px, env(safe-area-inset-left));
+}
+
+.pm-editor-max .pm_editor_body {
+    box-sizing: border-box;
+    width: min(100%, 1100px);
+    margin: 0 auto;
+    padding-right: max(12px, env(safe-area-inset-right));
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    padding-left: max(12px, env(safe-area-inset-left));
+}
 /* ── Progress overlay (backup / restore) ── */
 .pm_progress {
     position: absolute;
@@ -1547,6 +1593,12 @@
         padding: 12px;
     }
 
+    .pm_modal.pm-editor-max .pm_panel {
+        height: calc(100dvh - var(--topBarBlockSize, 0px));
+        max-height: calc(100dvh - var(--topBarBlockSize, 0px));
+        margin: var(--topBarBlockSize, 0px) 0 0;
+    }
+
     .pm_content {
         display: flex;
         flex-direction: column;
@@ -1598,28 +1650,14 @@
         gap: 12px;
     }
 
-    /* Editor takes over the whole content area as a full overlay. */
-    .pm_content.pm-editing,
-    .pm_content.has-folders.pm-editing {
-        grid-template-columns: minmax(0, 1fr);
-    }
-
-    .pm_editor {
-        position: absolute;
-        inset: 0;
-        z-index: 6;
-        border-radius: 0;
-        border: none;
-        transform: translateY(8px);
-    }
-
-    .pm_content.pm-editing .pm_editor {
-        transform: none;
-    }
-
     .pm_editor_back {
         display: inline-flex;
     }
+
+    .pm_editor_expand {
+        display: none;
+    }
+
 }
 
 @media (max-width: 600px) {
@@ -1629,9 +1667,19 @@
     }
 
     .pm_header {
-        align-items: stretch;
-        flex-direction: column;
+        align-items: center;
         gap: 8px;
+    }
+
+    .pm_header_copy {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .pm_header_copy h2 {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     .pm_header_copy p {
@@ -1640,8 +1688,9 @@
 
     .pm_header_actions {
         justify-content: flex-end;
+        flex: 0 0 auto;
         gap: 6px;
-        width: 100%;
+        width: auto;
     }
 
     .pm_header_actions .menu_button {

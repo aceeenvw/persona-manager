@@ -21,7 +21,7 @@ import {
 import { world_names, openWorldInfoEditor } from '../../../world-info.js';
 import { isFirefox } from '../../../browser-fixes.js';
 
-const VERSION = '1.1.1';
+const VERSION = '1.2.0';
 const MODULE_SETTINGS_KEY = 'aevPersonaManager';
 
 // ── Signature (aceenvw) ───────────────────────────────────────────────────
@@ -96,6 +96,12 @@ const PAGE_SIZES = Object.freeze([10, 30, 60, 100]);
 const GRID_SIZES = Object.freeze(['small', 'medium', 'large']);
 const SORT_MODES = Object.freeze(['az', 'za', 'newest', 'oldest', 'recent']);
 const FILTER_MODES = Object.freeze(['all', 'active', 'default', 'locked', 'favorites', 'unsorted']);
+const MOBILE_LAYOUT_QUERY = '(max-width: 900px)';
+const MOBILE_LAYOUT_MEDIA = window.matchMedia(MOBILE_LAYOUT_QUERY);
+
+function isMobileLayout() {
+    return MOBILE_LAYOUT_MEDIA.matches;
+}
 
 // Override themes. "native" carries no [data-theme] attribute (keeps the
 // SmartTheme-derived defaults); the rest override the --pm-* tokens in CSS.
@@ -134,7 +140,7 @@ const state = {
     selectMode: false,
     selected: new Set(),    // avatar ids selected for bulk actions
     editorId: null,         // avatar id currently open in the editor panel
-    editorMaximized: false, // editor panel expanded to fill the modal
+    editorMaximized: false, // editor expanded to the full viewport
     suppressEditorRerender: false, // guard against re-rendering during our own edits
     busy: false,            // backup/restore in progress
     suppressPersonaReload: false,
@@ -1492,6 +1498,7 @@ function openEditor(avatarId) {
     state.editorId = avatarId;
     state.dom.content?.classList.add('pm-editing');
     state.dom.editor?.classList.remove('pm_hidden');
+    setEditorMaximized(isMobileLayout());
     renderEditor();
 }
 
@@ -1515,9 +1522,8 @@ function closeEditor({ commit = true } = {}) {
 }
 
 /**
- * Expand the editor to fill the whole modal (over the grid/sidebar). Kept
- * separate from CodeMirror Pro's own fullscreen so the two coexist: CMP wraps
- * the description textarea inside its own dialog and toggles that independently.
+ * Expand the persona editor to a true viewport workspace. This remains separate
+ * from CodeMirror Pro, which owns its description-editor dialog independently.
  */
 function setEditorMaximized(on) {
     state.editorMaximized = on;
@@ -2239,7 +2245,7 @@ function bindModalEvents() {
             state.currentPage = 1;
             renderSidebar();
             renderGrid();
-            if (window.matchMedia('(max-width: 900px)').matches) dom.sidebar.classList.add('is-collapsed');
+            if (isMobileLayout()) dom.sidebar.classList.add('is-collapsed');
             return;
         }
 
@@ -2336,7 +2342,7 @@ function onGlobalKeydown(e) {
     if (e.key === 'Tab') {
         const openDialog = document.querySelector('dialog.popup[open], dialog[open]');
         if (openDialog && !state.dom.modal?.contains(openDialog)) return;
-        const mobileLayout = window.matchMedia('(max-width: 900px)').matches;
+        const mobileLayout = isMobileLayout();
         const focusable = [...state.dom.modal.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
             .filter((el) => el.offsetParent !== null && !(mobileLayout && el.closest('.pm_sidebar.is-collapsed')));
         if (!focusable.length) return;
@@ -2360,6 +2366,7 @@ function onGlobalKeydown(e) {
     e.preventDefault();
     if (isThemeMenuOpen()) { closeThemeMenu(); return; }
     if (isMoreMenuOpen()) { closeMoreMenu(); return; }
+    if (state.editorId && isMobileLayout()) { closeEditor(); return; }
     if (state.editorMaximized) { setEditorMaximized(false); return; }
     if (state.editorId) { closeEditor(); return; }
     closeManager();
@@ -2503,6 +2510,12 @@ function wireEvents() {
     });
 }
 
+function initResponsiveEditor() {
+    MOBILE_LAYOUT_MEDIA.addEventListener('change', (event) => {
+        if (event.matches && state.editorId) setEditorMaximized(true);
+    });
+}
+
 jQuery(async () => {
     LANG = detectLang();
     getSettings();
@@ -2510,5 +2523,6 @@ jQuery(async () => {
     startDrawerHijack();
     bindTopBarCloseHandlers();
     wireEvents();
+    initResponsiveEditor();
     initSaveSafetyNet();
 });
