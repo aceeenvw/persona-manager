@@ -21,7 +21,7 @@ import {
 import { world_names, openWorldInfoEditor } from '../../../world-info.js';
 import { isFirefox } from '../../../browser-fixes.js';
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const MODULE_SETTINGS_KEY = 'aevPersonaManager';
 
 // ── Signature (aceenvw) ───────────────────────────────────────────────────
@@ -64,10 +64,11 @@ const DEFAULT_SETTINGS = {
     tagDefs: [],       // reserved: tag definitions
     favorites: [],
     notes: {},
+    lastUsed: {},
     templates: [],     // reserved: Help/template mode (dropped, may revisit)
     firstSeen: {},     // fallback timestamp source for sort
     theme: 'native',
-    schemaVersion: 1,
+    schemaVersion: 2,
 };
 
 /** Resolve the extension folder name from the module URL. */
@@ -93,6 +94,8 @@ const TOKEN_WARN = 2000; // soft budget for the description token bar
 
 const PAGE_SIZES = Object.freeze([10, 30, 60, 100]);
 const GRID_SIZES = Object.freeze(['small', 'medium', 'large']);
+const SORT_MODES = Object.freeze(['az', 'za', 'newest', 'oldest', 'recent']);
+const FILTER_MODES = Object.freeze(['all', 'active', 'default', 'locked', 'favorites', 'unsorted']);
 
 // Override themes. "native" carries no [data-theme] attribute (keeps the
 // SmartTheme-derived defaults); the rest override the --pm-* tokens in CSS.
@@ -123,6 +126,7 @@ const state = {
     avatars: null,          // cached list of avatar ids from getUserAvatars(false)
     search: '',
     sort: 'az',
+    activeFilter: 'all',
     pageSize: 30,
     currentPage: 1,
     activeFolderId: FOLDER_ALL,
@@ -133,6 +137,9 @@ const state = {
     editorMaximized: false, // editor panel expanded to fill the modal
     suppressEditorRerender: false, // guard against re-rendering during our own edits
     busy: false,            // backup/restore in progress
+    suppressPersonaReload: false,
+    imageRevisions: new Map(), // cache keys only for avatars changed this session
+    lastFocusedElement: null,
 };
 
 const FALLBACK_AVATAR_URL = '/img/ai4.png';
@@ -157,15 +164,22 @@ function personaImageUrl(avatarId) {
     try {
         if (supportsPersonaThumbnails()) {
             const url = getThumbnailUrl('persona', avatarId, isFirefox());
-            if (typeof url === 'string' && url) return url;
+            if (typeof url === 'string' && url) return withImageRevision(url, avatarId);
         }
         // getUserAvatar() => "User Avatars/<file>"; encode each path segment so
         // the space in the directory name doesn't break the request.
         const path = getUserAvatar(avatarId).split('/').map(encodeURIComponent).join('/');
-        return `/${path}`;
+        return withImageRevision(`/${path}`, avatarId);
     } catch (_) {
         return FALLBACK_AVATAR_URL;
     }
+}
+
+function withImageRevision(url, avatarId) {
+    const revision = state.imageRevisions.get(avatarId);
+    if (!revision) return url;
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}pmv=${revision}`;
 }
 
 /** Persona metadata view-model for an avatar id. */
@@ -188,11 +202,20 @@ const I18N = {
         'app.title': '⊹ Persona Manager ⊹',
         'app.subtitle': 'Browse, organize and edit your personas.',
         'action.close': 'Close',
+        'action.more': 'More actions',
         'toolbar.search': 'Search...',
         'sort.az': 'Name A-Z',
         'sort.za': 'Name Z-A',
         'sort.newest': 'Newest first',
         'sort.oldest': 'Oldest first',
+        'sort.recent': 'Recently used',
+        'filter.heading': 'Quick filters',
+        'filter.all': 'All',
+        'filter.active': 'Active',
+        'filter.default': 'Default',
+        'filter.locked': 'Locked',
+        'filter.favorites': 'Favorites',
+        'filter.unsorted': 'Unsorted',
         'pager.prev': 'Previous page',
         'pager.next': 'Next page',
         'pager.range': '{from}–{to} of {total}',
@@ -209,6 +232,7 @@ const I18N = {
         'card.removeFromFolder': 'Remove from this folder',
         'card.delete': 'Delete persona',
         'card.deleteConfirm': 'Delete persona "{name}"? This cannot be undone.',
+        'card.deleteError': 'Failed to delete the persona.',
         'folder.all': 'All personas',
         'folder.favorites': 'Favorites',
         'folder.unfiled': 'Unsorted',
@@ -230,6 +254,8 @@ const I18N = {
         'select.deleteConfirm': 'Delete {n} persona(s)? This cannot be undone.',
         'backup.export': 'Backup personas (.zip)',
         'backup.import': 'Restore personas (.zip)',
+        'backup.exportShort': 'Backup',
+        'backup.importShort': 'Restore',
         'backup.empty': 'No personas to back up.',
         'backup.noZip': 'ZIP library unavailable.',
         'backup.invalid': 'Invalid or unreadable backup file.',
@@ -241,6 +267,7 @@ const I18N = {
         'backup.progressZip': 'Compressing…',
         'backup.progressImport': 'Restoring personas…',
         'convert.btn': 'Character → persona',
+        'convert.short': 'Convert',
         'convert.prompt': 'Convert which character to a persona?',
         'convert.empty': 'No characters to convert.',
         'convert.error': 'Failed to convert character to persona.',
@@ -307,16 +334,26 @@ const I18N = {
         'editor.duplicateConfirm': 'Duplicate persona "{name}"?',
         'editor.imageError': 'Failed to update the persona image.',
         'editor.duplicateError': 'Failed to duplicate the persona.',
+        'editor.duplicateDescription': 'Same description as: {names}',
     },
     ru: {
         'app.title': '⊹ Менеджер Персон ⊹',
         'app.subtitle': 'Просматривайте, организуйте и редактируйте свои персоны.',
         'action.close': 'Закрыть',
+        'action.more': 'Другие действия',
         'toolbar.search': 'Поиск...',
         'sort.az': 'Имя А-Я',
         'sort.za': 'Имя Я-А',
         'sort.newest': 'Сначала новые',
         'sort.oldest': 'Сначала старые',
+        'sort.recent': 'Недавно использованные',
+        'filter.heading': 'Быстрые фильтры',
+        'filter.all': 'Все',
+        'filter.active': 'Активная',
+        'filter.default': 'По умолчанию',
+        'filter.locked': 'Привязанные',
+        'filter.favorites': 'Избранное',
+        'filter.unsorted': 'Несортированное',
         'pager.prev': 'Предыдущая страница',
         'pager.next': 'Следующая страница',
         'pager.range': '{from}–{to} из {total}',
@@ -333,6 +370,7 @@ const I18N = {
         'card.removeFromFolder': 'Убрать из этой папки',
         'card.delete': 'Удалить персону',
         'card.deleteConfirm': 'Удалить персону «{name}»? Это действие необратимо.',
+        'card.deleteError': 'Не удалось удалить персону.',
         'folder.all': 'Все персоны',
         'folder.favorites': 'Избранное',
         'folder.unfiled': 'Несортированное',
@@ -354,6 +392,8 @@ const I18N = {
         'select.deleteConfirm': 'Удалить персон ({n})? Это действие необратимо.',
         'backup.export': 'Резервная копия персон (.zip)',
         'backup.import': 'Восстановить персон (.zip)',
+        'backup.exportShort': 'Копия',
+        'backup.importShort': 'Восстановить',
         'backup.empty': 'Нет персон для резервной копии.',
         'backup.noZip': 'Библиотека ZIP недоступна.',
         'backup.invalid': 'Недопустимый или нечитаемый файл резервной копии.',
@@ -365,6 +405,7 @@ const I18N = {
         'backup.progressZip': 'Сжатие…',
         'backup.progressImport': 'Восстановление персон…',
         'convert.btn': 'Персонаж → персона',
+        'convert.short': 'Преобразовать',
         'convert.prompt': 'Какого персонажа преобразовать в персону?',
         'convert.empty': 'Нет персонажей для преобразования.',
         'convert.error': 'Не удалось преобразовать персонажа в персону.',
@@ -431,6 +472,7 @@ const I18N = {
         'editor.duplicateConfirm': 'Дублировать персону «{name}»?',
         'editor.imageError': 'Не удалось обновить изображение персоны.',
         'editor.duplicateError': 'Не удалось дублировать персону.',
+        'editor.duplicateDescription': 'Такое же описание у: {names}',
     },
 };
 
@@ -483,6 +525,7 @@ function getSettings() {
     }
     if (!GRID_SIZES.includes(s.gridSize)) s.gridSize = DEFAULT_SETTINGS.gridSize;
     if (!PAGE_SIZES.includes(Number(s.pageSize))) s.pageSize = DEFAULT_SETTINGS.pageSize;
+    if (!SORT_MODES.includes(s.sort)) s.sort = DEFAULT_SETTINGS.sort;
     if (!THEMES.includes(s.theme)) s.theme = DEFAULT_SETTINGS.theme;
     return s;
 }
@@ -580,6 +623,25 @@ function toggleThemeMenu() {
     else openThemeMenu();
 }
 
+function isMoreMenuOpen() {
+    return state.dom.moreMenu?.classList.contains('is-open') || false;
+}
+
+function openMoreMenu() {
+    state.dom.moreMenu?.classList.add('is-open');
+    state.dom.moreBtn?.setAttribute('aria-expanded', 'true');
+}
+
+function closeMoreMenu() {
+    state.dom.moreMenu?.classList.remove('is-open');
+    state.dom.moreBtn?.setAttribute('aria-expanded', 'false');
+}
+
+function toggleMoreMenu() {
+    if (isMoreMenuOpen()) closeMoreMenu();
+    else openMoreMenu();
+}
+
 // ── Data & rendering ──────────────────────────────────────────────────────
 function escapeHtml(str) {
     return String(str).replace(/[&<>"']/g, (c) => (
@@ -667,6 +729,11 @@ function personaTimestamp(avatarId) {
     return typeof seen === 'number' ? seen : 0;
 }
 
+function isLockedPersona(avatarId) {
+    const connections = power_user.persona_descriptions?.[avatarId]?.connections;
+    return getContext().chatMetadata?.persona === avatarId || (Array.isArray(connections) && connections.length > 0);
+}
+
 function getVisiblePersonas() {
     const term = state.search.trim().toLowerCase();
     let list = (state.avatars || []).map(personaMeta);
@@ -686,6 +753,24 @@ function getVisiblePersonas() {
             p.description.toLowerCase().includes(term));
     }
 
+    switch (state.activeFilter) {
+        case 'active':
+            list = list.filter((p) => p.isCurrent);
+            break;
+        case 'default':
+            list = list.filter((p) => p.isDefault);
+            break;
+        case 'locked':
+            list = list.filter((p) => isLockedPersona(p.id));
+            break;
+        case 'favorites':
+            list = list.filter((p) => isFavorite(p.id));
+            break;
+        case 'unsorted':
+            list = list.filter((p) => !folderOf(p.id));
+            break;
+    }
+
     const cmp = (a, b) => a.name.localeCompare(b.name);
     switch (state.sort) {
         case 'za':
@@ -697,6 +782,11 @@ function getVisiblePersonas() {
         case 'oldest':
             list.sort((a, b) => personaTimestamp(a.id) - personaTimestamp(b.id) || cmp(a, b));
             break;
+        case 'recent': {
+            const lastUsed = getSettings().lastUsed;
+            list.sort((a, b) => (lastUsed[b.id] || 0) - (lastUsed[a.id] || 0) || cmp(a, b));
+            break;
+        }
         case 'az':
         default:
             list.sort(cmp);
@@ -704,8 +794,21 @@ function getVisiblePersonas() {
     }
 
     // Favorites float to the top in every view.
-    list.sort((a, b) => (isFavorite(b.id) ? 1 : 0) - (isFavorite(a.id) ? 1 : 0));
+    if (state.sort !== 'recent') {
+        list.sort((a, b) => (isFavorite(b.id) ? 1 : 0) - (isFavorite(a.id) ? 1 : 0));
+    }
     return list;
+}
+
+function setActiveFilter(filter) {
+    state.activeFilter = FILTER_MODES.includes(filter) ? filter : 'all';
+    state.currentPage = 1;
+    state.dom.filters?.querySelectorAll('[data-pm-filter]').forEach((btn) => {
+        const active = btn.dataset.pmFilter === state.activeFilter;
+        btn.classList.toggle('is-active', active);
+        btn.setAttribute('aria-pressed', String(active));
+    });
+    renderGrid();
 }
 
 function totalPages(count) {
@@ -938,9 +1041,20 @@ async function refresh({ reloadList = false } = {}) {
 
 // ── Actions ───────────────────────────────────────────────────────────────
 async function selectPersona(avatarId) {
+    const wasCurrent = avatarId === user_avatar;
     await setUserAvatar(avatarId);
-    // PERSONA_CHANGED event will trigger a refresh.
-    renderGrid();
+    // Changed personas are recorded through PERSONA_CHANGED. Reselecting the
+    // active card emits no event, so record that one directly.
+    if (wasCurrent) {
+        recordPersonaUse(avatarId);
+        if (state.sort === 'recent') renderGrid();
+    }
+}
+
+function recordPersonaUse(avatarId) {
+    if (!avatarId || !power_user.personas?.[avatarId]) return;
+    getSettings().lastUsed[avatarId] = Date.now();
+    saveSettings();
 }
 
 async function toggleLock(type) {
@@ -965,6 +1079,11 @@ async function deletePersonaViaNative(avatarId) {
             body: JSON.stringify({ avatar: avatarId }),
         });
         if (!res.ok) return false;
+        const wasCurrent = avatarId === user_avatar;
+        if (ctx.chatMetadata?.persona === avatarId) {
+            delete ctx.chatMetadata.persona;
+            await ctx.saveMetadata?.();
+        }
         delete power_user.personas[avatarId];
         delete power_user.persona_descriptions[avatarId];
         if (power_user.default_persona === avatarId) power_user.default_persona = null;
@@ -973,8 +1092,19 @@ async function deletePersonaViaNative(avatarId) {
         delete s.assignments[avatarId];
         const fi = s.favorites.indexOf(avatarId);
         if (fi >= 0) s.favorites.splice(fi, 1);
+        delete s.notes[avatarId];
+        delete s.firstSeen[avatarId];
+        delete s.lastUsed[avatarId];
         saveSettings();
         ctx.saveSettingsDebounced();
+        const knownAvatars = state.avatars || await getUserAvatars(false);
+        state.avatars = (Array.isArray(knownAvatars) ? knownAvatars : []).filter((id) => id !== avatarId);
+        if (wasCurrent && state.avatars.length) {
+            const fallback = state.avatars.includes(power_user.default_persona)
+                ? power_user.default_persona
+                : state.avatars[0];
+            await setUserAvatar(fallback, { toastPersonaNameChange: false });
+        }
         await eventSource.emit(event_types.PERSONA_DELETED, { avatarId, name: '' });
         return true;
     } catch (_) {
@@ -1310,8 +1440,10 @@ async function onCardAction(action, avatarId) {
             const name = power_user.personas?.[avatarId] || '';
             const ok = await ctx.Popup.show.confirm(t('card.delete'), t('card.deleteConfirm', { name }));
             if (!ok) return;
-            await deletePersonaViaNative(avatarId);
-            await refresh({ reloadList: true });
+            if (!(await deletePersonaViaNative(avatarId))) {
+                toastr.error(t('card.deleteError'));
+                return;
+            }
             break;
         }
     }
@@ -1363,19 +1495,20 @@ function openEditor(avatarId) {
     renderEditor();
 }
 
-function closeEditor() {
+function closeEditor({ commit = true } = {}) {
     // Capture any in-progress field edit before tearing the editor down, then
     // force a synchronous write so closing/reloading can't drop it.
     const id = state.editorId;
-    if (id && state.dom.fDesc) {
+    if (commit && id && state.dom.fDesc && power_user.personas?.[id]) {
         const obj = getDescriptor(id);
         if (obj.description !== state.dom.fDesc.value) {
             obj.description = state.dom.fDesc.value;
             commitDescriptor(id, obj);
         }
     }
-    flushSave();
+    if (commit) flushSave();
     state.editorId = null;
+    state.dom.duplicateWarning?.classList.add('pm_hidden');
     setEditorMaximized(false);
     state.dom.content?.classList.remove('pm-editing');
     state.dom.editor?.classList.add('pm_hidden');
@@ -1443,6 +1576,27 @@ function renderConnectionList(obj) {
         </span>`).join('');
 }
 
+function normalizedDescription(value) {
+    return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function updateDuplicateDescriptionWarning() {
+    const id = state.editorId;
+    const warning = state.dom.duplicateWarning;
+    if (!id || !warning || !state.dom.fDesc) return;
+    const normalized = normalizedDescription(state.dom.fDesc.value);
+    const names = normalized
+        ? Object.entries(power_user.persona_descriptions || {})
+            .filter(([otherId, descriptor]) => otherId !== id && normalizedDescription(descriptor?.description) === normalized)
+            .map(([otherId]) => power_user.personas?.[otherId] || '[Unnamed Persona]')
+        : [];
+    const uniqueNames = [...new Set(names)];
+    warning.classList.toggle('pm_hidden', uniqueNames.length === 0);
+    warning.textContent = uniqueNames.length
+        ? t('editor.duplicateDescription', { names: uniqueNames.join(', ') })
+        : '';
+}
+
 function renderEditor() {
     const id = state.editorId;
     if (!id || !state.dom.editor) return;
@@ -1482,6 +1636,7 @@ function renderEditor() {
 
     renderConnectionList(obj);
     updateTokenBar(obj.description || '');
+    updateDuplicateDescriptionWarning();
 }
 
 async function onEditorImagePicked(file) {
@@ -1499,13 +1654,31 @@ async function onEditorImagePicked(file) {
             body: form,
         });
         if (!res.ok) throw new Error(`upload ${res.status}`);
-        // Cache-bust the avatar + thumbnail, then re-render.
-        await fetch(`/${getUserAvatar(id).split('/').map(encodeURIComponent).join('/')}`, { cache: 'reload' }).catch(() => {});
-        renderEditor();
-        await refresh({ reloadList: true });
+        const data = await res.json();
+        const uploadedId = String(data?.path || id);
+        const fullUrl = `/${getUserAvatar(uploadedId).split('/').map(encodeURIComponent).join('/')}`;
+        await Promise.allSettled([
+            fetch(fullUrl, { cache: 'reload' }),
+            fetch(getThumbnailUrl('persona', uploadedId), { cache: 'reload' }),
+        ]);
+        state.imageRevisions.set(id, Date.now());
+        refreshVisibleAvatarImages(id);
     } catch (_) {
         toastr.error(t('editor.imageError'));
     }
+}
+
+function refreshVisibleAvatarImages(avatarId) {
+    const nextUrl = personaImageUrl(avatarId);
+    const escapedId = CSS.escape(avatarId);
+    const images = new Set(state.dom.modal?.querySelectorAll(`.pm_card[data-avatar-id="${escapedId}"] img`) || []);
+    if (state.editorId === avatarId && state.dom.editorImg) images.add(state.dom.editorImg);
+    if (user_avatar === avatarId) {
+        state.dom.spotlight?.querySelectorAll('img').forEach((img) => images.add(img));
+        document.querySelectorAll('.mes[is_user="true"][force_avatar="false"] .avatar img').forEach((img) => images.add(img));
+    }
+    document.querySelectorAll(`#user_avatar_block .avatar[data-avatar-id="${escapedId}"] img`).forEach((img) => images.add(img));
+    images.forEach((img) => { img.src = nextUrl; });
 }
 
 async function onEditorDuplicate() {
@@ -1585,15 +1758,20 @@ async function onEditorDelete() {
     const name = power_user.personas?.[id] || '';
     const ok = await ctx.Popup.show.confirm(t('card.delete'), t('card.deleteConfirm', { name }));
     if (!ok) return;
-    await deletePersonaViaNative(id);
-    closeEditor();
-    await refresh({ reloadList: true });
+    closeEditor({ commit: false });
+    if (!(await deletePersonaViaNative(id))) {
+        toastr.error(t('card.deleteError'));
+        openEditor(id);
+        return;
+    }
 }
 
 /** Wire editor field + action listeners (called once when the DOM is built). */
 function bindEditorEvents() {
     const d = state.dom;
     if (!d.editor) return;
+    let titleTimer = null;
+    let tokenTimer = null;
 
     d.editorClose?.addEventListener('click', closeEditor);
     d.editorBack?.addEventListener('click', closeEditor);
@@ -1604,9 +1782,15 @@ function bindEditorEvents() {
         const obj = getDescriptor(id);
         obj.title = d.fTitle.value;
         d.editorSubtitle.textContent = obj.title;
-        commitDescriptor(id, obj);
+        clearTimeout(titleTimer);
+        titleTimer = setTimeout(() => commitDescriptor(id, obj), 250);
     });
-    d.fTitle?.addEventListener('blur', flushSave);
+    d.fTitle?.addEventListener('blur', () => {
+        const id = state.editorId; if (!id) return;
+        clearTimeout(titleTimer);
+        commitDescriptor(id, getDescriptor(id));
+        flushSave();
+    });
 
     // Description uses a jQuery `input` binding (NOT addEventListener): ST's
     // full-screen editor writes back via jQuery `.trigger('input')`, which native
@@ -1617,7 +1801,9 @@ function bindEditorEvents() {
             const id = state.editorId; if (!id) return;
             const obj = getDescriptor(id);
             obj.description = d.fDesc.value;
-            updateTokenBar(obj.description);
+            d.duplicateWarning?.classList.add('pm_hidden');
+            clearTimeout(tokenTimer);
+            tokenTimer = setTimeout(() => updateTokenBar(obj.description), 180);
             clearTimeout(descTimer);
             descTimer = setTimeout(() => commitDescriptor(id, obj), 300);
         });
@@ -1626,8 +1812,11 @@ function bindEditorEvents() {
         $(d.fDesc).on('blur', () => {
             const id = state.editorId; if (!id) return;
             clearTimeout(descTimer);
+            clearTimeout(tokenTimer);
             const obj = getDescriptor(id);
             obj.description = d.fDesc.value;
+            updateTokenBar(obj.description);
+            updateDuplicateDescriptionWarning();
             commitDescriptor(id, obj);
             flushSave();
         });
@@ -1684,6 +1873,7 @@ function bindEditorEvents() {
     d.connLocks?.addEventListener('click', (e) => {
         const btn = e.target.closest('[data-pm-lock]');
         if (!btn || btn.disabled) return;
+        e.stopPropagation();
         toggleLock(btn.getAttribute('data-pm-lock')).then(renderEditor);
     });
 
@@ -1726,7 +1916,9 @@ function updateSelectUI() {
 }
 
 function selectAllVisible() {
-    for (const p of getVisiblePersonas()) state.selected.add(p.id);
+    const all = getVisiblePersonas();
+    const start = (state.currentPage - 1) * state.pageSize;
+    for (const p of all.slice(start, start + state.pageSize)) state.selected.add(p.id);
     renderGrid();
 }
 
@@ -1736,9 +1928,18 @@ async function bulkDelete() {
     const ctx = getContext();
     const ok = await ctx.Popup.show.confirm(t('select.delete'), t('select.deleteConfirm', { n: ids.length }));
     if (!ok) return;
-    for (const id of ids) await deletePersonaViaNative(id);
-    state.selected.clear();
-    setSelectMode(false);
+    const failed = [];
+    state.suppressPersonaReload = true;
+    try {
+        for (const id of ids) {
+            if (!(await deletePersonaViaNative(id))) failed.push(id);
+        }
+    } finally {
+        state.suppressPersonaReload = false;
+    }
+    state.selected = new Set(failed);
+    if (!failed.length) setSelectMode(false);
+    else toastr.error(t('card.deleteError'));
     await refresh({ reloadList: true });
 }
 
@@ -1919,6 +2120,7 @@ async function ensureDom() {
         spotlight: modal.querySelector('#pm_spotlight'),
         search: modal.querySelector('#pm_search'),
         sort: modal.querySelector('#pm_sort'),
+        filters: modal.querySelector('#pm_filters'),
         newFolder: modal.querySelector('#pm_new_folder'),
         selectToggle: modal.querySelector('#pm_select_toggle'),
         selectBar: modal.querySelector('#pm_select_bar'),
@@ -1939,6 +2141,8 @@ async function ensureDom() {
         themeBtn: modal.querySelector('#pm_theme_btn'),
         themeMenu: modal.querySelector('#pm_theme_menu'),
         themeMenuGrid: modal.querySelector('#pm_theme_menu_grid'),
+        moreBtn: modal.querySelector('#pm_more_btn'),
+        moreMenu: modal.querySelector('#pm_more_menu'),
         backup: modal.querySelector('#pm_backup'),
         restore: modal.querySelector('#pm_restore'),
         restoreInput: modal.querySelector('#pm_restore_input'),
@@ -1967,6 +2171,7 @@ async function ensureDom() {
         loreOpen: modal.querySelector('#pm_lore_open'),
         tokenFill: modal.querySelector('#pm_token_fill'),
         tokenNum: modal.querySelector('#pm_token_num'),
+        duplicateWarning: modal.querySelector('#pm_duplicate_warning'),
         connLocks: modal.querySelector('#pm_conn_locks'),
         connHint: modal.querySelector('#pm_conn_hint'),
         connList: modal.querySelector('#pm_conn_list'),
@@ -1990,11 +2195,12 @@ function bindModalEvents() {
     modal.addEventListener('click', (e) => {
         // Any click outside the theme menu/button closes the palette popover.
         if (isThemeMenuOpen() && !e.target.closest('#pm_theme_btn')) closeThemeMenu();
+        if (isMoreMenuOpen() && !e.target.closest('.pm_more_wrap')) closeMoreMenu();
 
         const action = e.target.closest('[data-pm-action]')?.getAttribute('data-pm-action');
         if (action === 'close') { closeManager(); return; }
 
-        const lockBtn = e.target.closest('[data-pm-lock]');
+        const lockBtn = e.target.closest('[data-pm-lock]:not(.pm_conn_btn)');
         if (lockBtn) { toggleLock(lockBtn.getAttribute('data-pm-lock')); return; }
 
         const checkBtn = e.target.closest('[data-pm-check]');
@@ -2053,6 +2259,15 @@ function bindModalEvents() {
         }
     });
 
+    modal.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        if (e.target.closest('button, input, select, textarea, a')) return;
+        const item = e.target.closest('.pm_card, .pm_folder_row');
+        if (!item) return;
+        e.preventDefault();
+        item.click();
+    });
+
     dom.newFolder?.addEventListener('click', onNewFolder);
     dom.selectToggle?.addEventListener('click', () => setSelectMode(!state.selectMode));
     dom.selectAll?.addEventListener('click', selectAllVisible);
@@ -2064,18 +2279,26 @@ function bindModalEvents() {
 
     dom.themeBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
+        closeMoreMenu();
         toggleThemeMenu();
     });
     dom.themeMenu?.addEventListener('click', (e) => e.stopPropagation());
 
-    dom.backup?.addEventListener('click', onBackup);
-    dom.restore?.addEventListener('click', () => dom.restoreInput?.click());
+    dom.moreBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeThemeMenu();
+        toggleMoreMenu();
+    });
+    dom.moreMenu?.addEventListener('click', (e) => e.stopPropagation());
+
+    dom.backup?.addEventListener('click', () => { closeMoreMenu(); onBackup(); });
+    dom.restore?.addEventListener('click', () => { closeMoreMenu(); dom.restoreInput?.click(); });
     dom.restoreInput?.addEventListener('change', () => {
         const file = dom.restoreInput.files?.[0];
         dom.restoreInput.value = '';
         if (file) onRestoreFile(file);
     });
-    dom.convert?.addEventListener('click', onConvert);
+    dom.convert?.addEventListener('click', () => { closeMoreMenu(); onConvert(); });
     dom.create?.addEventListener('click', onCreate);
 
     bindDragAndDrop();
@@ -2097,6 +2320,11 @@ function bindModalEvents() {
         renderGrid();
     });
 
+    dom.filters?.addEventListener('click', (e) => {
+        const chip = e.target.closest('[data-pm-filter]');
+        if (chip) setActiveFilter(chip.dataset.pmFilter);
+    });
+
     dom.pagerPrev?.addEventListener('click', () => { state.currentPage--; renderGrid(); });
     dom.pagerNext?.addEventListener('click', () => { state.currentPage++; renderGrid(); });
 
@@ -2104,17 +2332,41 @@ function bindModalEvents() {
 }
 
 function onGlobalKeydown(e) {
-    if (e.key !== 'Escape' || !state.isOpen) return;
+    if (!state.isOpen) return;
+    if (e.key === 'Tab') {
+        const openDialog = document.querySelector('dialog.popup[open], dialog[open]');
+        if (openDialog && !state.dom.modal?.contains(openDialog)) return;
+        const mobileLayout = window.matchMedia('(max-width: 900px)').matches;
+        const focusable = [...state.dom.modal.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+            .filter((el) => el.offsetParent !== null && !(mobileLayout && el.closest('.pm_sidebar.is-collapsed')));
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (!state.dom.modal.contains(document.activeElement)) {
+            e.preventDefault();
+            (e.shiftKey ? last : first).focus();
+        } else if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+        }
+        return;
+    }
+    if (e.key !== 'Escape') return;
     // Let an open popup/dialog (e.g. CodeMirror Pro's editor) handle Escape first.
     if (document.querySelector('dialog.popup[open], dialog[open]')) return;
     e.preventDefault();
     if (isThemeMenuOpen()) { closeThemeMenu(); return; }
+    if (isMoreMenuOpen()) { closeMoreMenu(); return; }
     if (state.editorMaximized) { setEditorMaximized(false); return; }
     if (state.editorId) { closeEditor(); return; }
     closeManager();
 }
 
 async function openManager() {
+    state.lastFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     await ensureDom();
     const s = getSettings();
     state.isOpen = true;
@@ -2127,14 +2379,19 @@ async function openManager() {
     state.dom.modal.classList.remove('pm_hidden');
     collapseNativePersonaDrawer();
     await refresh({ reloadList: true });
+    const touchLayout = window.matchMedia('(pointer: coarse), (max-width: 600px)').matches;
+    (touchLayout ? state.dom.modal : state.dom.search)?.focus({ preventScroll: true });
 }
 
 function closeManager() {
     if (!state.dom.modal) return;
     state.isOpen = false;
     closeThemeMenu();
+    closeMoreMenu();
     closeEditor();
     state.dom.modal.classList.add('pm_hidden');
+    if (state.lastFocusedElement?.isConnected) state.lastFocusedElement.focus({ preventScroll: true });
+    state.lastFocusedElement = null;
 }
 
 function collapseNativePersonaDrawer() {
@@ -2222,6 +2479,7 @@ function wireEvents() {
         if (state.editorId && !state.suppressEditorRerender) renderEditor();
     };
     const reload = async () => {
+        if (state.suppressPersonaReload) return;
         state.avatars = null;
         if (!state.isOpen) return;
         await refresh({ reloadList: true });
@@ -2231,12 +2489,18 @@ function wireEvents() {
             else closeEditor();
         }
     };
-    eventSource.on(event_types.PERSONA_CHANGED, reRender);
+    eventSource.on(event_types.PERSONA_CHANGED, (avatarId) => {
+        recordPersonaUse(avatarId || user_avatar);
+        reRender();
+    });
     eventSource.on(event_types.PERSONA_UPDATED, reRender);
     eventSource.on(event_types.PERSONA_CREATED, reload);
     eventSource.on(event_types.PERSONA_DELETED, reload);
     eventSource.on(event_types.PERSONA_RENAMED, reload);
-    eventSource.on(event_types.CHAT_CHANGED, reRender);
+    eventSource.on(event_types.CHAT_CHANGED, () => {
+        recordPersonaUse(user_avatar);
+        reRender();
+    });
 }
 
 jQuery(async () => {

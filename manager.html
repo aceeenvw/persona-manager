@@ -1,31 +1,37 @@
-<div id="pm_modal" class="pm_modal pm_hidden" data-build="">
+<div id="pm_modal" class="pm_modal pm_hidden" data-build="" role="dialog" aria-modal="true" aria-labelledby="pm_title" tabindex="-1">
     <div class="pm_backdrop" data-pm-action="close"></div>
     <div class="pm_panel">
         <div class="pm_header">
             <div class="pm_header_copy">
-                <h2 data-i18n="app.title">⊹ Persona Manager ⊹</h2>
+                <h2 id="pm_title" data-i18n="app.title">⊹ Persona Manager ⊹</h2>
                 <p data-i18n="app.subtitle">Browse, organize and edit your personas.</p>
             </div>
             <div class="pm_header_actions">
                 <button id="pm_create" type="button" class="menu_button menu_button_icon interactable" title="Create persona" data-i18n-title="create.btn" aria-label="Create persona" data-i18n-aria-label="create.btn">
                     <i class="fa-solid fa-user-plus"></i>
                 </button>
-                <button id="pm_theme_btn" type="button" class="menu_button menu_button_icon interactable pm_theme_btn" title="Theme" data-i18n-title="theme.pick" aria-label="Theme" data-i18n-aria-label="theme.pick" aria-haspopup="true" aria-expanded="false">
-                    <i class="fa-solid fa-palette"></i>
-                </button>
-                <button id="pm_backup" type="button" class="menu_button menu_button_icon interactable" title="Backup personas" data-i18n-title="backup.export" aria-label="Backup personas" data-i18n-aria-label="backup.export">
-                    <i class="fa-solid fa-download"></i>
-                </button>
-                <button id="pm_restore" type="button" class="menu_button menu_button_icon interactable" title="Restore personas" data-i18n-title="backup.import" aria-label="Restore personas" data-i18n-aria-label="backup.import">
-                    <i class="fa-solid fa-upload"></i>
-                </button>
+                <div class="pm_more_wrap">
+                    <button id="pm_more_btn" type="button" class="menu_button menu_button_icon interactable pm_more_btn" title="More actions" data-i18n-title="action.more" aria-label="More actions" data-i18n-aria-label="action.more" aria-haspopup="menu" aria-expanded="false">
+                        <i class="fa-solid fa-ellipsis"></i>
+                    </button>
+                    <div id="pm_more_menu" class="pm_more_menu" role="menu">
+                        <button id="pm_theme_btn" type="button" class="menu_button menu_button_icon interactable pm_theme_btn" title="Theme" data-i18n-title="theme.pick" aria-label="Theme" data-i18n-aria-label="theme.pick" aria-haspopup="true" aria-expanded="false" role="menuitem">
+                            <i class="fa-solid fa-palette"></i><span data-i18n="theme.pick">Theme</span>
+                        </button>
+                        <button id="pm_backup" type="button" class="menu_button menu_button_icon interactable" title="Backup personas" data-i18n-title="backup.export" aria-label="Backup personas" data-i18n-aria-label="backup.export" role="menuitem">
+                            <i class="fa-solid fa-download"></i><span data-i18n="backup.exportShort">Backup</span>
+                        </button>
+                        <button id="pm_restore" type="button" class="menu_button menu_button_icon interactable" title="Restore personas" data-i18n-title="backup.import" aria-label="Restore personas" data-i18n-aria-label="backup.import" role="menuitem">
+                            <i class="fa-solid fa-upload"></i><span data-i18n="backup.importShort">Restore</span>
+                        </button>
+                        <button id="pm_convert" type="button" class="menu_button menu_button_icon interactable" title="Convert character to persona" data-i18n-title="convert.btn" aria-label="Convert character to persona" data-i18n-aria-label="convert.btn" role="menuitem">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i><span data-i18n="convert.short">Convert</span>
+                        </button>
+                    </div>
+                </div>
                 <input id="pm_restore_input" type="file" accept=".zip,application/zip" hidden />
-                <button id="pm_convert" type="button" class="menu_button menu_button_icon interactable" title="Convert character to persona" data-i18n-title="convert.btn" aria-label="Convert character to persona" data-i18n-aria-label="convert.btn">
-                    <i class="fa-solid fa-wand-magic-sparkles"></i>
-                </button>
-                <button id="pm_close" type="button" class="menu_button menu_button_icon interactable" data-pm-action="close" title="Close" data-i18n-title="action.close">
+                <button id="pm_close" type="button" class="menu_button menu_button_icon interactable" data-pm-action="close" title="Close" data-i18n-title="action.close" aria-label="Close" data-i18n-aria-label="action.close">
                     <i class="fa-solid fa-xmark"></i>
-                    <span data-i18n="action.close">Close</span>
                 </button>
             </div>
         </div>
@@ -45,6 +51,7 @@
                 <option value="za" data-i18n="sort.za">Name Z-A</option>
                 <option value="newest" data-i18n="sort.newest">Newest first</option>
                 <option value="oldest" data-i18n="sort.oldest">Oldest first</option>
+                <option value="recent" data-i18n="sort.recent">Recently used</option>
             </select>
             <button id="pm_new_folder" type="button" class="menu_button menu_button_icon interactable" title="New folder" data-i18n-title="folder.new">
                 <i class="fa-solid fa-folder-plus"></i>
@@ -52,6 +59,15 @@
             <button id="pm_select_toggle" type="button" class="menu_button menu_button_icon interactable" title="Select" data-i18n-title="select.toggle">
                 <i class="fa-solid fa-square-check"></i>
             </button>
+        </div>
+
+        <div id="pm_filters" class="pm_filters" role="group" aria-label="Quick filters" data-i18n-aria-label="filter.heading">
+            <button type="button" class="pm_filter_chip is-active" data-pm-filter="all" aria-pressed="true" data-i18n="filter.all">All</button>
+            <button type="button" class="pm_filter_chip" data-pm-filter="active" aria-pressed="false"><i class="fa-solid fa-circle-check"></i><span data-i18n="filter.active">Active</span></button>
+            <button type="button" class="pm_filter_chip" data-pm-filter="default" aria-pressed="false"><i class="fa-solid fa-crown"></i><span data-i18n="filter.default">Default</span></button>
+            <button type="button" class="pm_filter_chip" data-pm-filter="locked" aria-pressed="false"><i class="fa-solid fa-lock"></i><span data-i18n="filter.locked">Locked</span></button>
+            <button type="button" class="pm_filter_chip" data-pm-filter="favorites" aria-pressed="false"><i class="fa-solid fa-star"></i><span data-i18n="filter.favorites">Favorites</span></button>
+            <button type="button" class="pm_filter_chip" data-pm-filter="unsorted" aria-pressed="false"><i class="fa-solid fa-inbox"></i><span data-i18n="filter.unsorted">Unsorted</span></button>
         </div>
 
         <div id="pm_select_bar" class="pm_select_bar pm_hidden">
@@ -144,6 +160,7 @@
                             <span class="pm_token_count"><span id="pm_token_num">0</span> <span data-i18n="editor.tokens">tokens</span></span>
                         </div>
                         <textarea id="pm_field_desc" class="text_pole textarea_compact" rows="9" autocomplete="off"></textarea>
+                        <div id="pm_duplicate_warning" class="pm_duplicate_warning pm_hidden" role="status"></div>
                     </div>
 
                     <label class="pm_field">
