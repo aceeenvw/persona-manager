@@ -2,7 +2,6 @@ import {
     eventSource,
     event_types,
     saveSettings as stSaveSettings,
-    saveSettingsDebounced,
     getThumbnailUrl,
     setUserName,
     default_user_avatar,
@@ -13,6 +12,7 @@ import {
     getUserAvatars,
     getUserAvatar,
     setUserAvatar,
+    setPersonaDescription,
     user_avatar,
     isPersonaLocked,
     togglePersonaLock,
@@ -21,54 +21,21 @@ import {
 import { world_names, openWorldInfoEditor } from '../../../world-info.js';
 import { isFirefox } from '../../../browser-fixes.js';
 
-const VERSION = '1.2.0';
 const MODULE_SETTINGS_KEY = 'aevPersonaManager';
-
-// ── Signature (aceenvw) ───────────────────────────────────────────────────
-// `_SIG` is rebuilt from delta-encoded byte differences of the author string,
-// never stored as a plaintext literal. It seeds the build stamp written to the
-// modal's [data-build] attribute (CSS gates the panel chrome on its presence).
-const _SIG = (() => {
-    const deltas = [2, 2, 0, 9, 8, 1]; // diffs between consecutive bytes of the author
-    let code = 97; // 'a'
-    let out = String.fromCharCode(code);
-    for (const d of deltas) { code += d; out += String.fromCharCode(code); }
-    return out;
-})();
-
-function fnv1a(seed) {
-    let h = 0x811c9dc5;
-    for (let i = 0; i < seed.length; i++) {
-        h ^= seed.charCodeAt(i);
-        h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
-    }
-    return h >>> 0;
-}
-
-function buildStamp(version) {
-    try {
-        return btoa(JSON.stringify({ a: _SIG, v: version, h: fnv1a(version).toString(16) }));
-    } catch (_) {
-        return '';
-    }
-}
 
 const DEFAULT_SETTINGS = {
     hijackDrawer: true,
     sort: 'az',
-    gridSize: 'medium',
+    gridColumns: '6',
+    aspectRatio: '4 / 5',
     pageSize: 30,
     folders: [],
     assignments: {},
-    tags: {},          // reserved: tags UI (chips + filter) not yet built
-    tagDefs: [],       // reserved: tag definitions
     favorites: [],
     notes: {},
     lastUsed: {},
-    templates: [],     // reserved: Help/template mode (dropped, may revisit)
     firstSeen: {},     // fallback timestamp source for sort
     theme: 'native',
-    schemaVersion: 2,
 };
 
 /** Resolve the extension folder name from the module URL. */
@@ -87,17 +54,18 @@ const FOLDER_UNFILED = '__unfiled__';
 const FOLDER_FAVORITES = '__favorites__';
 
 // Persona description positions + defaults, mirroring personas.js.
-const POS = { IN_PROMPT: 0, TOP_AN: 2, BOTTOM_AN: 3, AT_DEPTH: 4, NONE: 9 };
+const POS = { IN_PROMPT: 0, AT_DEPTH: 4 };
 const DEFAULT_DEPTH = 2;
 const DEFAULT_ROLE = 0;
-const TOKEN_WARN = 2000; // soft budget for the description token bar
 
 const PAGE_SIZES = Object.freeze([10, 30, 60, 100]);
-const GRID_SIZES = Object.freeze(['small', 'medium', 'large']);
+const GRID_COLUMNS = Object.freeze(['auto', '3', '4', '5', '6', '7', '8', '9', '10']);
+const ASPECT_RATIOS = Object.freeze(['1 / 1', '3 / 4', '4 / 5', '5 / 4', '4 / 3']);
 const SORT_MODES = Object.freeze(['az', 'za', 'newest', 'oldest', 'recent']);
 const FILTER_MODES = Object.freeze(['all', 'active', 'default', 'locked', 'favorites', 'unsorted']);
 const MOBILE_LAYOUT_QUERY = '(max-width: 900px)';
 const MOBILE_LAYOUT_MEDIA = window.matchMedia(MOBILE_LAYOUT_QUERY);
+const EDITOR_UPDATE = Symbol('persona-manager-edit');
 
 function isMobileLayout() {
     return MOBILE_LAYOUT_MEDIA.matches;
@@ -127,9 +95,12 @@ const THEME_LABEL_KEYS = Object.freeze({
 
 const state = {
     isOpen: false,
+    openGeneration: 0,
+    domPromise: null,
     suppressDrawerHijack: false,
     dom: {},
     avatars: null,          // cached list of avatar ids from getUserAvatars(false)
+    avatarLoadGeneration: 0,
     search: '',
     sort: 'az',
     activeFilter: 'all',
@@ -141,11 +112,18 @@ const state = {
     selected: new Set(),    // avatar ids selected for bulk actions
     editorId: null,         // avatar id currently open in the editor panel
     editorMaximized: false, // editor expanded to the full viewport
-    suppressEditorRerender: false, // guard against re-rendering during our own edits
+    editorCommitted: null,
+    editorOpener: null,
+    commitEditorEdits: null,
+    savePending: false,
+    saveTimer: null,
+    saveStatus: '',
+    searchTimer: null,
     busy: false,            // backup/restore in progress
     suppressPersonaReload: false,
     imageRevisions: new Map(), // cache keys only for avatars changed this session
     lastFocusedElement: null,
+    overlayOpener: null,
 };
 
 const FALLBACK_AVATAR_URL = '/img/ai4.png';
@@ -190,7 +168,7 @@ function withImageRevision(url, avatarId) {
 
 /** Persona metadata view-model for an avatar id. */
 function personaMeta(avatarId) {
-    const name = power_user.personas?.[avatarId] || '[Unnamed Persona]';
+    const name = power_user.personas?.[avatarId] || t('persona.unnamed');
     const desc = power_user.persona_descriptions?.[avatarId];
     return {
         id: avatarId,
@@ -205,11 +183,13 @@ function personaMeta(avatarId) {
 // ── i18n (EN / RU) ────────────────────────────────────────────────────────
 const I18N = {
     en: {
-        'app.title': '⊹ Persona Manager ⊹',
-        'app.subtitle': 'Browse, organize and edit your personas.',
+        'app.title': 'Persona Manager',
+        'persona.unnamed': '[Unnamed Persona]',
         'action.close': 'Close',
         'action.more': 'More actions',
         'toolbar.search': 'Search...',
+        'toolbar.searchLabel': 'Search personas',
+        'toolbar.sort': 'Sort personas',
         'sort.az': 'Name A-Z',
         'sort.za': 'Name Z-A',
         'sort.newest': 'Newest first',
@@ -227,22 +207,31 @@ const I18N = {
         'pager.range': '{from}–{to} of {total}',
         'status.empty': 'No personas match this view yet.',
         'spotlight.heading': 'Current persona',
+        'spotlight.edit': 'Edit current persona: {name}',
         'spotlight.none': 'No persona selected',
         'lock.chat': 'Chat',
         'lock.character': 'Character',
         'lock.default': 'Default',
         'action.favorite': 'Toggle favorite',
         'card.active': 'Active',
+        'card.use': 'Use persona: {name}',
+        'card.select': 'Select persona: {name}',
         'card.edit': 'Edit',
         'card.move': 'Move to folder',
         'card.removeFromFolder': 'Remove from this folder',
         'card.delete': 'Delete persona',
+        'card.favoriteFor': 'Toggle favorite: {name}',
+        'card.editFor': 'Edit persona: {name}',
+        'card.moveFor': 'Move to folder: {name}',
+        'card.removeFor': 'Remove {name} from this folder',
+        'card.deleteFor': 'Delete persona: {name}',
         'card.deleteConfirm': 'Delete persona "{name}"? This cannot be undone.',
         'card.deleteError': 'Failed to delete the persona.',
         'folder.all': 'All personas',
         'folder.favorites': 'Favorites',
         'folder.unfiled': 'Unsorted',
         'folder.heading': 'Folders',
+        'folder.toggle': 'Toggle folders',
         'folder.new': 'New folder',
         'folder.namePrompt': 'Enter a name for the new folder:',
         'folder.rename': 'Rename folder',
@@ -287,11 +276,11 @@ const I18N = {
         'settings.hijack': 'Open manager instead of the default Persona panel',
         'settings.hijackDesc': 'Clicking the Persona Management drawer button opens this manager.',
         'settings.displayHeading': 'Display',
-        'settings.gridSize': 'Card size',
-        'settings.gridSizeDesc': 'Grid density inside the manager.',
-        'settings.grid.small': 'Small',
-        'settings.grid.medium': 'Medium',
-        'settings.grid.large': 'Large',
+        'settings.gridColumns': 'Cards per row',
+        'settings.gridColumnsDesc': 'Maximum count on larger screens; fewer columns in narrow spaces. Mobile uses two columns.',
+        'settings.aspectRatio': 'Image ratio',
+        'settings.aspectRatioDesc': 'Avatar proportions on desktop and mobile.',
+        'settings.grid.auto': 'Auto',
         'settings.pageSize': 'Personas per page',
         'settings.pageSizeDesc': 'Fewer per page keeps large libraries fast.',
         'settings.themeHeading': 'Appearance',
@@ -305,6 +294,9 @@ const I18N = {
         'theme.solarizedDark': 'Solarized Dark',
         'theme.nord': 'Nord',
         'editor.back': 'Back',
+        'editor.heading': 'Persona editor',
+        'editor.saving': 'Pending save',
+        'editor.autosave': 'Autosave',
         'editor.close': 'Close editor',
         'editor.expand': 'Full screen',
         'editor.collapse': 'Exit full screen',
@@ -340,14 +332,15 @@ const I18N = {
         'editor.duplicateConfirm': 'Duplicate persona "{name}"?',
         'editor.imageError': 'Failed to update the persona image.',
         'editor.duplicateError': 'Failed to duplicate the persona.',
-        'editor.duplicateDescription': 'Same description as: {names}',
     },
     ru: {
-        'app.title': '⊹ Менеджер Персон ⊹',
-        'app.subtitle': 'Просматривайте, организуйте и редактируйте свои персоны.',
+        'app.title': 'Менеджер персон',
+        'persona.unnamed': '[Безымянная персона]',
         'action.close': 'Закрыть',
         'action.more': 'Другие действия',
         'toolbar.search': 'Поиск...',
+        'toolbar.searchLabel': 'Поиск персон',
+        'toolbar.sort': 'Сортировка персон',
         'sort.az': 'Имя А-Я',
         'sort.za': 'Имя Я-А',
         'sort.newest': 'Сначала новые',
@@ -365,22 +358,31 @@ const I18N = {
         'pager.range': '{from}–{to} из {total}',
         'status.empty': 'Нет персон, подходящих под этот вид.',
         'spotlight.heading': 'Текущая персона',
+        'spotlight.edit': 'Редактировать текущую персону: {name}',
         'spotlight.none': 'Персона не выбрана',
         'lock.chat': 'Чат',
         'lock.character': 'Персонаж',
         'lock.default': 'По умолчанию',
         'action.favorite': 'В избранное',
         'card.active': 'Активна',
+        'card.use': 'Использовать персону: {name}',
+        'card.select': 'Выбрать персону: {name}',
         'card.edit': 'Редактировать',
         'card.move': 'Переместить в папку',
         'card.removeFromFolder': 'Убрать из этой папки',
         'card.delete': 'Удалить персону',
+        'card.favoriteFor': 'В избранное: {name}',
+        'card.editFor': 'Редактировать персону: {name}',
+        'card.moveFor': 'Переместить в папку: {name}',
+        'card.removeFor': 'Убрать {name} из этой папки',
+        'card.deleteFor': 'Удалить персону: {name}',
         'card.deleteConfirm': 'Удалить персону «{name}»? Это действие необратимо.',
         'card.deleteError': 'Не удалось удалить персону.',
         'folder.all': 'Все персоны',
         'folder.favorites': 'Избранное',
         'folder.unfiled': 'Несортированное',
         'folder.heading': 'Папки',
+        'folder.toggle': 'Показать или скрыть папки',
         'folder.new': 'Новая папка',
         'folder.namePrompt': 'Введите название новой папки:',
         'folder.rename': 'Переименовать папку',
@@ -425,11 +427,11 @@ const I18N = {
         'settings.hijack': 'Открывать менеджер вместо стандартной панели персон',
         'settings.hijackDesc': 'Нажатие на кнопку панели управления персонами открывает этот менеджер.',
         'settings.displayHeading': 'Отображение',
-        'settings.gridSize': 'Размер карточек',
-        'settings.gridSizeDesc': 'Плотность сетки внутри менеджера.',
-        'settings.grid.small': 'Маленький',
-        'settings.grid.medium': 'Средний',
-        'settings.grid.large': 'Большой',
+        'settings.gridColumns': 'Карточек в ряду',
+        'settings.gridColumnsDesc': 'Максимум на больших экранах; в узких областях столбцов меньше. На мобильных два столбца.',
+        'settings.aspectRatio': 'Пропорции изображений',
+        'settings.aspectRatioDesc': 'Пропорции аватаров на компьютере и телефоне.',
+        'settings.grid.auto': 'Авто',
         'settings.pageSize': 'Персон на странице',
         'settings.pageSizeDesc': 'Меньше на странице — быстрее работает большая библиотека.',
         'settings.themeHeading': 'Оформление',
@@ -443,6 +445,9 @@ const I18N = {
         'theme.solarizedDark': 'Solarized Dark',
         'theme.nord': 'Nord',
         'editor.back': 'Назад',
+        'editor.heading': 'Редактор персоны',
+        'editor.saving': 'Ожидает сохранения',
+        'editor.autosave': 'Автосохранение',
         'editor.close': 'Закрыть редактор',
         'editor.expand': 'На весь экран',
         'editor.collapse': 'Свернуть',
@@ -478,7 +483,6 @@ const I18N = {
         'editor.duplicateConfirm': 'Дублировать персону «{name}»?',
         'editor.imageError': 'Не удалось обновить изображение персоны.',
         'editor.duplicateError': 'Не удалось дублировать персону.',
-        'editor.duplicateDescription': 'Такое же описание у: {names}',
     },
 };
 
@@ -514,10 +518,15 @@ function i18nApplyDom(root) {
     });
     const attrs = [['data-i18n-title', 'title'], ['data-i18n-placeholder', 'placeholder'], ['data-i18n-aria-label', 'aria-label']];
     for (const [dataAttr, realAttr] of attrs) {
+        if (root.hasAttribute(dataAttr)) root.setAttribute(realAttr, t(root.getAttribute(dataAttr)));
         root.querySelectorAll(`[${dataAttr}]`).forEach((el) => {
             el.setAttribute(realAttr, t(el.getAttribute(dataAttr)));
         });
     }
+    root.querySelectorAll('button[title]:not([aria-label]), [role="button"][title]:not([aria-label])').forEach((el) => {
+        el.setAttribute('aria-label', el.title);
+    });
+    root.querySelectorAll('button i').forEach((el) => el.setAttribute('aria-hidden', 'true'));
 }
 
 /** Lazily get-or-create settings, back-filling defaults. */
@@ -529,7 +538,8 @@ function getSettings() {
     for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) {
         if (!(k in s)) s[k] = structuredClone(v);
     }
-    if (!GRID_SIZES.includes(s.gridSize)) s.gridSize = DEFAULT_SETTINGS.gridSize;
+    s.gridColumns = GRID_COLUMNS.includes(String(s.gridColumns)) ? String(s.gridColumns) : DEFAULT_SETTINGS.gridColumns;
+    if (!ASPECT_RATIOS.includes(s.aspectRatio)) s.aspectRatio = DEFAULT_SETTINGS.aspectRatio;
     if (!PAGE_SIZES.includes(Number(s.pageSize))) s.pageSize = DEFAULT_SETTINGS.pageSize;
     if (!SORT_MODES.includes(s.sort)) s.sort = DEFAULT_SETTINGS.sort;
     if (!THEMES.includes(s.theme)) s.theme = DEFAULT_SETTINGS.theme;
@@ -537,19 +547,26 @@ function getSettings() {
 }
 
 function saveSettings() {
-    saveSettingsDebounced();
+    state.savePending = true;
+    setSaveStatus('editor.saving');
+    clearTimeout(state.saveTimer);
+    state.saveTimer = setTimeout(flushSave, 500);
 }
 
-/**
- * Force an immediate (non-debounced) settings write so edits survive a reload
- * that happens inside the debounce window. Falls back to the debounced save if
- * the direct call is unavailable/throws. Use at teardown/blur, NOT per keystroke.
- */
+/** Submit queued changes before blur/teardown instead of waiting for debounce. */
 function flushSave() {
-    try {
-        if (typeof stSaveSettings === 'function') { stSaveSettings(); return; }
-    } catch (_) { /* fall through to debounced */ }
-    saveSettingsDebounced();
+    if (!state.savePending) return;
+    clearTimeout(state.saveTimer);
+    state.saveTimer = null;
+    state.savePending = false;
+    stSaveSettings();
+    setSaveStatus('editor.autosave');
+}
+
+function setSaveStatus(key) {
+    state.saveStatus = key;
+    const text = key ? t(key) : '';
+    if (state.dom.saveStatus && state.dom.saveStatus.textContent !== text) state.dom.saveStatus.textContent = text;
 }
 
 /** Inject the settings panel into the extensions tab. */
@@ -567,16 +584,28 @@ function bindSettingsUI() {
     $hijack.prop('checked', !!s.hijackDrawer);
     $hijack.off('change.pm').on('change.pm', function () {
         s.hijackDrawer = $(this).prop('checked');
+        if (s.hijackDrawer) hijackPersonaDrawer();
         saveSettings();
     });
 
-    const $grid = $('#pm_grid_size');
-    $grid.val(s.gridSize);
+    const $grid = $('#pm_grid_columns');
+    $grid.val(s.gridColumns);
     $grid.off('change.pm').on('change.pm', function () {
         const val = String($(this).val());
-        s.gridSize = GRID_SIZES.includes(val) ? val : DEFAULT_SETTINGS.gridSize;
+        s.gridColumns = GRID_COLUMNS.includes(val) ? val : DEFAULT_SETTINGS.gridColumns;
+        $(this).val(s.gridColumns);
         saveSettings();
-        if (state.isOpen) { applyGridSize(); renderGrid(); }
+        applyGridLayout();
+    });
+
+    const $ratio = $('#pm_aspect_ratio');
+    $ratio.val(s.aspectRatio);
+    $ratio.off('change.pm').on('change.pm', function () {
+        const val = String($(this).val());
+        s.aspectRatio = ASPECT_RATIOS.includes(val) ? val : DEFAULT_SETTINGS.aspectRatio;
+        $(this).val(s.aspectRatio);
+        saveSettings();
+        applyGridLayout();
     });
 
     const $page = $('#pm_page_size');
@@ -585,7 +614,7 @@ function bindSettingsUI() {
         const val = Number($(this).val());
         s.pageSize = PAGE_SIZES.includes(val) ? val : DEFAULT_SETTINGS.pageSize;
         saveSettings();
-        if (state.isOpen) { state.pageSize = s.pageSize; state.currentPage = 1; renderGrid(); }
+        if (state.isOpen) { state.pageSize = s.pageSize; state.currentPage = 1; renderGrid({ resetScroll: true }); }
     });
 
     const grid = document.getElementById('pm_theme_grid');
@@ -612,16 +641,17 @@ function openThemeMenu() {
     if (!d.themeMenu) return;
     renderThemeSwatches(d.themeMenuGrid, (id) => { pickTheme(id); closeThemeMenu(); });
     d.themeMenu.classList.remove('pm_hidden');
-    d.themeBtn?.classList.add('is-on');
     d.themeBtn?.setAttribute('aria-expanded', 'true');
+    d.themeMenuGrid?.querySelector('[aria-pressed="true"]')?.focus({ preventScroll: true });
 }
 
 function closeThemeMenu() {
     const d = state.dom;
     if (!d.themeMenu) return;
+    const restoreFocus = d.themeMenu.contains(document.activeElement);
     d.themeMenu.classList.add('pm_hidden');
-    d.themeBtn?.classList.remove('is-on');
     d.themeBtn?.setAttribute('aria-expanded', 'false');
+    if (restoreFocus) (d.themeBtn?.offsetParent ? d.themeBtn : d.moreBtn)?.focus({ preventScroll: true });
 }
 
 function toggleThemeMenu() {
@@ -639,8 +669,12 @@ function openMoreMenu() {
 }
 
 function closeMoreMenu() {
+    const active = document.activeElement;
     state.dom.moreMenu?.classList.remove('is-open');
     state.dom.moreBtn?.setAttribute('aria-expanded', 'false');
+    if (state.dom.moreMenu?.contains(active) && active.offsetParent === null) {
+        state.dom.moreBtn?.focus({ preventScroll: true });
+    }
 }
 
 function toggleMoreMenu() {
@@ -655,13 +689,6 @@ function escapeHtml(str) {
     ));
 }
 
-async function loadAvatars(force = false) {
-    if (state.avatars && !force) return state.avatars;
-    const list = await getUserAvatars(false);
-    state.avatars = Array.isArray(list) ? list : [];
-    return state.avatars;
-}
-
 // ── Folders & favorites ───────────────────────────────────────────────────
 function isFavorite(avatarId) {
     return getSettings().favorites.includes(avatarId);
@@ -673,10 +700,6 @@ function toggleFavorite(avatarId) {
     if (i >= 0) favs.splice(i, 1);
     else favs.push(avatarId);
     saveSettings();
-}
-
-function folderOf(avatarId) {
-    return getSettings().assignments[avatarId] || null;
 }
 
 function assignToFolder(avatarId, folderId) {
@@ -714,24 +737,24 @@ function renameFolder(folderId, name) {
 function countInFolder(folderId) {
     const list = state.avatars || [];
     if (folderId === FOLDER_ALL) return list.length;
-    if (folderId === FOLDER_FAVORITES) return list.filter(isFavorite).length;
-    if (folderId === FOLDER_UNFILED) return list.filter((id) => !folderOf(id)).length;
-    return list.filter((id) => folderOf(id) === folderId).length;
+    const { favorites, assignments } = getSettings();
+    if (folderId === FOLDER_FAVORITES) {
+        const ids = new Set(favorites);
+        return list.filter((id) => ids.has(id)).length;
+    }
+    if (folderId === FOLDER_UNFILED) return list.filter((id) => !assignments[id]).length;
+    return list.filter((id) => assignments[id] === folderId).length;
 }
 
 function hasFolders() {
     return getSettings().folders.length > 0;
 }
 
-/**
- * Resolve a persona's creation time for newest/oldest sort. Persona avatar ids
- * are minted as `${Date.now()}-name.png`, so the leading epoch is the real
- * creation timestamp. Falls back to a remembered firstSeen, then 0.
- */
-function personaTimestamp(avatarId) {
+/** Sort by the avatar's leading timestamp, then stored firstSeen, then 0. */
+function personaTimestamp(avatarId, firstSeen) {
     const m = String(avatarId).match(/^(\d{10,})/);
     if (m) return Number(m[1]);
-    const seen = getSettings().firstSeen?.[avatarId];
+    const seen = firstSeen?.[avatarId];
     return typeof seen === 'number' ? seen : 0;
 }
 
@@ -741,15 +764,18 @@ function isLockedPersona(avatarId) {
 }
 
 function getVisiblePersonas() {
+    const settings = getSettings();
+    const favorites = new Set(settings.favorites);
+    const assignments = settings.assignments;
     const term = state.search.trim().toLowerCase();
     let list = (state.avatars || []).map(personaMeta);
 
     // Folder filter (skipped while searching, so search spans the whole library).
     const folder = state.activeFolderId;
     if (!term && folder && folder !== FOLDER_ALL) {
-        if (folder === FOLDER_FAVORITES) list = list.filter((p) => isFavorite(p.id));
-        else if (folder === FOLDER_UNFILED) list = list.filter((p) => !folderOf(p.id));
-        else list = list.filter((p) => folderOf(p.id) === folder);
+        if (folder === FOLDER_FAVORITES) list = list.filter((p) => favorites.has(p.id));
+        else if (folder === FOLDER_UNFILED) list = list.filter((p) => !assignments[p.id]);
+        else list = list.filter((p) => assignments[p.id] === folder);
     }
 
     if (term) {
@@ -770,10 +796,10 @@ function getVisiblePersonas() {
             list = list.filter((p) => isLockedPersona(p.id));
             break;
         case 'favorites':
-            list = list.filter((p) => isFavorite(p.id));
+            list = list.filter((p) => favorites.has(p.id));
             break;
         case 'unsorted':
-            list = list.filter((p) => !folderOf(p.id));
+            list = list.filter((p) => !assignments[p.id]);
             break;
     }
 
@@ -783,13 +809,13 @@ function getVisiblePersonas() {
             list.sort((a, b) => cmp(b, a));
             break;
         case 'newest':
-            list.sort((a, b) => personaTimestamp(b.id) - personaTimestamp(a.id) || cmp(a, b));
+            list.sort((a, b) => personaTimestamp(b.id, settings.firstSeen) - personaTimestamp(a.id, settings.firstSeen) || cmp(a, b));
             break;
         case 'oldest':
-            list.sort((a, b) => personaTimestamp(a.id) - personaTimestamp(b.id) || cmp(a, b));
+            list.sort((a, b) => personaTimestamp(a.id, settings.firstSeen) - personaTimestamp(b.id, settings.firstSeen) || cmp(a, b));
             break;
         case 'recent': {
-            const lastUsed = getSettings().lastUsed;
+            const lastUsed = settings.lastUsed;
             list.sort((a, b) => (lastUsed[b.id] || 0) - (lastUsed[a.id] || 0) || cmp(a, b));
             break;
         }
@@ -799,9 +825,9 @@ function getVisiblePersonas() {
             break;
     }
 
-    // Favorites float to the top in every view.
+    // Favorites take priority except when sorting by recent use.
     if (state.sort !== 'recent') {
-        list.sort((a, b) => (isFavorite(b.id) ? 1 : 0) - (isFavorite(a.id) ? 1 : 0));
+        list.sort((a, b) => Number(favorites.has(b.id)) - Number(favorites.has(a.id)));
     }
     return list;
 }
@@ -814,7 +840,7 @@ function setActiveFilter(filter) {
         btn.classList.toggle('is-active', active);
         btn.setAttribute('aria-pressed', String(active));
     });
-    renderGrid();
+    renderGrid({ resetScroll: true });
 }
 
 function totalPages(count) {
@@ -822,27 +848,27 @@ function totalPages(count) {
 }
 
 function lockBadgesHtml(meta) {
-    if (!meta.isCurrent) {
-        return meta.isDefault
-            ? '<span class="pm_chip pm_chip_default"><i class="fa-solid fa-crown"></i></span>'
-            : '';
-    }
-    const chips = [];
-    if (isPersonaLocked('chat')) chips.push('<span class="pm_chip pm_chip_chat"><i class="fa-solid fa-comment"></i></span>');
-    if (isPersonaLocked('character')) chips.push('<span class="pm_chip pm_chip_char"><i class="fa-solid fa-user-lock"></i></span>');
-    if (meta.isDefault) chips.push('<span class="pm_chip pm_chip_default"><i class="fa-solid fa-crown"></i></span>');
-    return chips.join('');
+    return [
+        ['chat', 'chat', 'comment', meta.isCurrent && isPersonaLocked('chat')],
+        ['character', 'char', 'lock', meta.isCurrent && isPersonaLocked('character')],
+        ['default', 'default', 'crown', meta.isDefault],
+    ].filter(([, , , on]) => on).map(([type, chip, icon]) =>
+        `<span class="pm_chip pm_chip_${chip}" role="img" title="${escapeHtml(t(`lock.${type}`))}" aria-label="${escapeHtml(t(`lock.${type}`))}"><i class="fa-solid fa-${icon}" aria-hidden="true"></i></span>`,
+    ).join('');
 }
 
-/** Reflect the configured card size onto the grid for CSS density rules. */
-function applyGridSize() {
-    if (state.dom.grid) state.dom.grid.dataset.size = getSettings().gridSize;
+/** Apply card proportions and columns without replacing image nodes. */
+function applyGridLayout() {
+    const grid = state.dom.grid;
+    if (!grid) return;
+    const s = getSettings();
+    grid.dataset.columns = s.gridColumns;
+    grid.style.setProperty('--pm-card-ratio', s.aspectRatio);
 }
 
 /**
  * Apply the chosen override theme to the modal. "native" removes the attribute
- * entirely so the SmartTheme-derived defaults (and the [data-build] signature
- * gate) remain untouched.
+ * entirely so the SmartTheme-derived defaults remain untouched.
  */
 function applyTheme() {
     const modal = state.dom.modal;
@@ -863,7 +889,7 @@ function renderThemeSwatches(container, onPick) {
         const [bg, fg, ac] = THEME_SWATCHES[id];
         const isActive = id === active ? ' is-active' : '';
         return `
-        <button type="button" class="pm_theme_swatch${isActive}" role="radio" aria-checked="${id === active}" data-pm-theme="${escapeHtml(id)}" style="--sw-bg:${bg};--sw-fg:${fg};--sw-ac:${ac};">
+        <button type="button" class="pm_theme_swatch${isActive}" aria-pressed="${id === active}" data-pm-theme="${escapeHtml(id)}" style="--sw-bg:${bg};--sw-fg:${fg};--sw-ac:${ac};">
             <span class="pm_theme_preview" aria-hidden="true">
                 <span class="pm_theme_line pm_theme_line_a"></span>
                 <span class="pm_theme_line pm_theme_line_b"></span>
@@ -884,14 +910,19 @@ function syncThemeSwatchMarkers() {
     document.querySelectorAll('[data-pm-theme]').forEach((btn) => {
         const on = btn.getAttribute('data-pm-theme') === active;
         btn.classList.toggle('is-active', on);
-        btn.setAttribute('aria-checked', String(on));
+        btn.setAttribute('aria-pressed', String(on));
     });
 }
 
-function renderGrid() {
+function renderGrid({ resetScroll = false } = {}) {
     const grid = state.dom.grid;
     if (!grid) return;
-    applyGridSize();
+    const focused = grid.contains(document.activeElement) ? document.activeElement : null;
+    const focusedId = focused?.closest('.pm_card')?.dataset.avatarId;
+    const focusSelector = focused?.hasAttribute('data-pm-fav') ? '[data-pm-fav]'
+        : focused?.dataset.pmCard ? `[data-pm-card="${CSS.escape(focused.dataset.pmCard)}"]` : '.pm_card_pick';
+    const scrollTop = resetScroll ? 0 : grid.scrollTop;
+    applyGridLayout();
 
     const all = getVisiblePersonas();
     const pages = totalPages(all.length);
@@ -900,45 +931,52 @@ function renderGrid() {
     const pageItems = all.slice(start, start + state.pageSize);
 
     const fid = state.activeFolderId;
-    const inRealFolder = fid && fid !== FOLDER_ALL && fid !== FOLDER_FAVORITES && fid !== FOLDER_UNFILED;
+    const settings = getSettings();
+    const inRealFolder = settings.folders.some((folder) => folder.id === fid);
 
-    grid.innerHTML = '';
+    const fragment = document.createDocumentFragment();
     for (const meta of pageItems) {
         const card = document.createElement('div');
-        card.className = 'pm_card interactable';
+        card.className = 'pm_card';
         if (meta.isCurrent) card.classList.add('is-active');
         if (meta.isDefault) card.classList.add('is-default');
         if (state.selected.has(meta.id)) card.classList.add('is-selected');
         card.dataset.avatarId = meta.id;
-        card.tabIndex = 0;
         card.draggable = !state.selectMode;
         card.title = meta.title ? `${meta.name} — ${meta.title}` : meta.name;
+        card.setAttribute('role', 'group');
+        card.setAttribute('aria-label', meta.name);
         const fav = isFavorite(meta.id);
         const checked = state.selected.has(meta.id);
         card.innerHTML = `
-            <div class="pm_card_cover">
-                <img src="${escapeHtml(personaImageUrl(meta.id))}" alt="${escapeHtml(meta.name)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${FALLBACK_AVATAR_URL}';" />
-                <button type="button" class="pm_card_check" data-pm-check="${escapeHtml(meta.id)}" aria-label="select">
+            <button type="button" class="pm_card_pick" aria-label="${escapeHtml(t(state.selectMode ? 'card.select' : 'card.use', { name: meta.name }))}" aria-pressed="${state.selectMode ? checked : meta.isCurrent}">
+            <span class="pm_card_cover">
+                <img src="${escapeHtml(personaImageUrl(meta.id))}" alt="" draggable="false" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${FALLBACK_AVATAR_URL}';" />
+                <span class="pm_card_check" aria-hidden="true">
                     <i class="fa-${checked ? 'solid fa-square-check' : 'regular fa-square'}"></i>
+                </span>
+                <span class="pm_card_body">
+                    <span class="pm_card_name">${meta.isCurrent ? `<i class="pm_card_active fa-solid fa-circle-check" title="${escapeHtml(t('card.active'))}" aria-hidden="true"></i>` : ''}${escapeHtml(meta.name)}</span>
+                    <span class="pm_card_title"${meta.title ? '' : ' hidden'}>${escapeHtml(meta.title)}</span>
+                </span>
+            </span>
+            </button>
+            <div class="pm_card_meta">
+                <span class="pm_card_badges">${lockBadgesHtml(meta)}</span>
+                <button type="button" class="pm_card_fav ${fav ? 'is-on' : ''}" data-pm-fav="${escapeHtml(meta.id)}" title="${escapeHtml(t('action.favorite'))}" aria-label="${escapeHtml(t('card.favoriteFor', { name: meta.name }))}" aria-pressed="${fav}">
+                    <i class="fa-${fav ? 'solid' : 'regular'} fa-star" aria-hidden="true"></i>
                 </button>
-                <button type="button" class="pm_card_fav ${fav ? 'is-on' : ''}" data-pm-fav="${escapeHtml(meta.id)}" title="${escapeHtml(t('action.favorite'))}" aria-label="${escapeHtml(t('action.favorite'))}">
-                    <i class="fa-${fav ? 'solid' : 'regular'} fa-star"></i>
-                </button>
-                <div class="pm_card_badges">${lockBadgesHtml(meta)}</div>
-                ${meta.isCurrent ? `<span class="pm_card_active"><i class="fa-solid fa-circle-check"></i>${escapeHtml(t('card.active'))}</span>` : ''}
-            </div>
-            <div class="pm_card_body">
-                <span class="pm_card_name">${escapeHtml(meta.name)}</span>
-                ${meta.title ? `<span class="pm_card_title">${escapeHtml(meta.title)}</span>` : ''}
             </div>
             <div class="pm_card_actions">
-                <button type="button" class="pm_card_action" data-pm-card="edit" title="${escapeHtml(t('card.edit'))}" aria-label="${escapeHtml(t('card.edit'))}"><i class="fa-solid fa-pencil"></i></button>
-                <button type="button" class="pm_card_action" data-pm-card="move" title="${escapeHtml(t('card.move'))}" aria-label="${escapeHtml(t('card.move'))}"><i class="fa-solid fa-folder-open"></i></button>
-                ${inRealFolder ? `<button type="button" class="pm_card_action" data-pm-card="remove" title="${escapeHtml(t('card.removeFromFolder'))}" aria-label="${escapeHtml(t('card.removeFromFolder'))}"><i class="fa-solid fa-folder-minus"></i></button>` : ''}
-                <button type="button" class="pm_card_action pm_card_action_danger" data-pm-card="delete" title="${escapeHtml(t('card.delete'))}" aria-label="${escapeHtml(t('card.delete'))}"><i class="fa-solid fa-trash-can"></i></button>
+                <button type="button" class="pm_card_action" data-pm-card="edit" title="${escapeHtml(t('card.edit'))}" aria-label="${escapeHtml(t('card.editFor', { name: meta.name }))}"><i class="fa-solid fa-pencil"></i></button>
+                <button type="button" class="pm_card_action" data-pm-card="move" title="${escapeHtml(t('card.move'))}" aria-label="${escapeHtml(t('card.moveFor', { name: meta.name }))}"><i class="fa-solid fa-folder-open"></i></button>
+                ${inRealFolder && settings.assignments[meta.id] === fid ? `<button type="button" class="pm_card_action" data-pm-card="remove" title="${escapeHtml(t('card.removeFromFolder'))}" aria-label="${escapeHtml(t('card.removeFor', { name: meta.name }))}"><i class="fa-solid fa-folder-minus"></i></button>` : ''}
+                <button type="button" class="pm_card_action pm_card_action_danger" data-pm-card="delete" title="${escapeHtml(t('card.delete'))}" aria-label="${escapeHtml(t('card.deleteFor', { name: meta.name }))}"><i class="fa-solid fa-trash-can"></i></button>
             </div>`;
-        grid.appendChild(card);
+        card.querySelectorAll('button i').forEach((icon) => icon.setAttribute('aria-hidden', 'true'));
+        fragment.appendChild(card);
     }
+    grid.replaceChildren(fragment);
 
     const isEmpty = all.length === 0;
     state.dom.empty.classList.toggle('pm_hidden', !isEmpty);
@@ -947,6 +985,11 @@ function renderGrid() {
 
     updateSelectUI();
     renderPager(pages, all.length);
+    grid.scrollTop = scrollTop;
+    if (focused) {
+        const card = focusedId && grid.querySelector(`.pm_card[data-avatar-id="${CSS.escape(focusedId)}"]`);
+        (card?.querySelector(focusSelector) || (isEmpty ? state.dom.search : grid))?.focus({ preventScroll: true });
+    }
 }
 
 function renderPager(pages, total) {
@@ -970,6 +1013,8 @@ function renderPager(pages, total) {
 function renderSpotlight() {
     const el = state.dom.spotlight;
     if (!el) return;
+    const focused = el.contains(document.activeElement) ? document.activeElement : null;
+    const focusedLock = focused?.dataset.pmLock;
     const id = user_avatar;
     if (!id) {
         el.innerHTML = `<div class="pm_spotlight_empty">${escapeHtml(t('spotlight.none'))}</div>`;
@@ -977,25 +1022,27 @@ function renderSpotlight() {
     }
     const meta = personaMeta(id);
     el.innerHTML = `
-        <div class="pm_spotlight_avatar">
-            <img src="${escapeHtml(personaImageUrl(id))}" alt="${escapeHtml(meta.name)}" onerror="this.onerror=null;this.src='${FALLBACK_AVATAR_URL}';" />
-        </div>
-        <div class="pm_spotlight_info">
-            <span class="pm_spotlight_heading">${escapeHtml(t('spotlight.heading'))}</span>
-            <span class="pm_spotlight_name">${escapeHtml(meta.name)}</span>
-            ${meta.title ? `<span class="pm_spotlight_title">${escapeHtml(meta.title)}</span>` : ''}
-        </div>
+        <button type="button" class="pm_spotlight_pick" data-pm-action="edit-current" title="${escapeHtml(t('card.edit'))}" aria-label="${escapeHtml(t('spotlight.edit', { name: meta.name }))}">
+        <span class="pm_spotlight_avatar">
+            <img src="${escapeHtml(personaImageUrl(id))}" alt="" onerror="this.onerror=null;this.src='${FALLBACK_AVATAR_URL}';" />
+        </span>
+        <span class="pm_spotlight_info">
+            <span class="pm_spotlight_name" title="${escapeHtml(meta.name)}">${escapeHtml(meta.name)}</span>
+            <span class="pm_spotlight_title" title="${escapeHtml(meta.title)}"${meta.title ? '' : ' hidden'}>${escapeHtml(meta.title)}</span>
+        </span>
+        <i class="pm_spotlight_edit fa-solid fa-pencil" aria-hidden="true"></i>
+        </button>
         <div class="pm_spotlight_locks">
-            <button type="button" class="pm_lock_btn ${isPersonaLocked('chat') ? 'is-on' : ''}" data-pm-lock="chat" title="${escapeHtml(t('lock.chat'))}">
-                <i class="fa-solid fa-comment"></i><span>${escapeHtml(t('lock.chat'))}</span>
-            </button>
-            <button type="button" class="pm_lock_btn ${isPersonaLocked('character') ? 'is-on' : ''}" data-pm-lock="character" title="${escapeHtml(t('lock.character'))}">
-                <i class="fa-solid fa-user-lock"></i><span>${escapeHtml(t('lock.character'))}</span>
-            </button>
-            <button type="button" class="pm_lock_btn ${isPersonaLocked('default') ? 'is-on' : ''}" data-pm-lock="default" title="${escapeHtml(t('lock.default'))}">
-                <i class="fa-solid fa-crown"></i><span>${escapeHtml(t('lock.default'))}</span>
-            </button>
+            ${[['chat', 'comment'], ['character', 'user-lock'], ['default', 'crown']].map(([type, icon]) => {
+                const on = isPersonaLocked(type);
+                const label = escapeHtml(t(`lock.${type}`));
+                return `<button type="button" class="pm_lock_btn ${on ? 'is-on' : ''}" data-pm-lock="${type}" title="${label}" aria-label="${label}" aria-pressed="${on}">
+                    <i class="fa-solid fa-${icon}" aria-hidden="true"></i>
+                </button>`;
+            }).join('')}
         </div>`;
+    if (focusedLock) el.querySelector(`[data-pm-lock="${CSS.escape(focusedLock)}"]`)?.focus({ preventScroll: true });
+    else if (focused) el.querySelector('.pm_spotlight_pick')?.focus({ preventScroll: true });
 }
 
 function folderRowHtml(id, label, icon, { fixed = false } = {}) {
@@ -1007,16 +1054,22 @@ function folderRowHtml(id, label, icon, { fixed = false } = {}) {
                 <button type="button" class="pm_folder_tool pm_folder_tool_danger" data-folder-del="${escapeHtml(id)}" title="${escapeHtml(t('folder.delete'))}" aria-label="${escapeHtml(t('folder.delete'))}"><i class="fa-solid fa-trash-can"></i></button>
             </div>`;
     return `
-        <div class="pm_folder_row${active}" data-folder-id="${escapeHtml(id)}" tabindex="0" role="button">
-            <i class="fa-solid ${icon} pm_folder_icon"></i>
+        <div class="pm_folder_row${active}" data-folder-id="${escapeHtml(id)}">
+            <button type="button" class="pm_folder_pick" aria-pressed="${!!active}">
+            <i class="fa-solid ${icon} pm_folder_icon" aria-hidden="true"></i>
             <span class="pm_folder_name">${escapeHtml(label)}</span>
-            <span class="pm_folder_count">${count}</span>${tools}
+            <span class="pm_folder_count">${count}</span>
+            </button>${tools}
         </div>`;
 }
 
 function renderSidebar() {
     const el = state.dom.sidebar;
     if (!el) return;
+    const focused = el.contains(document.activeElement) ? document.activeElement : null;
+    const focusedId = focused?.closest('[data-folder-id]')?.dataset.folderId;
+    const focusSelector = focused?.hasAttribute('data-folder-rename') ? '[data-folder-rename]'
+        : focused?.hasAttribute('data-folder-del') ? '[data-folder-del]' : '.pm_folder_pick';
     const s = getSettings();
     const folders = [...s.folders].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
@@ -1028,6 +1081,11 @@ function renderSidebar() {
     for (const f of folders) html += folderRowHtml(f.id, f.name, 'fa-folder');
     html += `</div>`;
     el.innerHTML = html;
+    el.querySelectorAll('button i').forEach((icon) => icon.setAttribute('aria-hidden', 'true'));
+    if (focusedId) {
+        const row = el.querySelector(`[data-folder-id="${CSS.escape(focusedId)}"]`);
+        (row?.querySelector(focusSelector) || state.dom.search)?.focus({ preventScroll: true });
+    }
 }
 
 function applyFolderLayout() {
@@ -1036,13 +1094,25 @@ function applyFolderLayout() {
     content.classList.toggle('has-folders', hasFolders());
 }
 
-async function refresh({ reloadList = false } = {}) {
-    if (reloadList) await loadAvatars(true);
-    else await loadAvatars(false);
+async function refresh() {
+    const generation = state.openGeneration;
+    const loadGeneration = ++state.avatarLoadGeneration;
+    const list = await getUserAvatars(false);
+    if (!state.isOpen || generation !== state.openGeneration || loadGeneration !== state.avatarLoadGeneration) return false;
+    state.avatars = Array.isArray(list) ? list : [];
+    const ids = new Set(state.avatars);
+    for (const id of state.selected) {
+        if (!ids.has(id)) state.selected.delete(id);
+    }
     applyFolderLayout();
     renderSidebar();
     renderSpotlight();
     renderGrid();
+    if (state.editorId) {
+        if (ids.has(state.editorId)) renderEditor();
+        else closeEditor({ commit: false });
+    }
+    return true;
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────
@@ -1085,11 +1155,14 @@ async function deletePersonaViaNative(avatarId) {
             body: JSON.stringify({ avatar: avatarId }),
         });
         if (!res.ok) return false;
+        state.avatarLoadGeneration++;
+        state.selected.delete(avatarId);
         const wasCurrent = avatarId === user_avatar;
         if (ctx.chatMetadata?.persona === avatarId) {
             delete ctx.chatMetadata.persona;
             await ctx.saveMetadata?.();
         }
+        if (state.editorId === avatarId) closeEditor({ commit: false });
         delete power_user.personas[avatarId];
         delete power_user.persona_descriptions[avatarId];
         if (power_user.default_persona === avatarId) power_user.default_persona = null;
@@ -1119,15 +1192,10 @@ async function deletePersonaViaNative(avatarId) {
 }
 
 // ── Backup / Restore (ZIP: personas.json + persona-images/) ───────────────
-// Uses ST's bundled JSZip (local only, no CDN), matching background/backup
-// manager conventions. The archive holds the native persona JSON shape plus
-// each persona's avatar image so a restore can re-upload the photos (native
-// backup is JSON-only).
+// Uses ST's bundled JSZip for native persona JSON and avatar images.
 
-let _zipReady = false;
 async function ensureZip() {
-    if (_zipReady && window.JSZip) return true;
-    if (window.JSZip) { _zipReady = true; return true; }
+    if (window.JSZip) return true;
     const ok = await new Promise((resolve) => {
         const s = document.createElement('script');
         s.src = '/lib/jszip.min.js';
@@ -1135,8 +1203,7 @@ async function ensureZip() {
         s.onerror = () => resolve(false);
         document.head.appendChild(s);
     });
-    if (ok && window.JSZip) { _zipReady = true; return true; }
-    return false;
+    return ok && !!window.JSZip;
 }
 
 function downloadBlob(blob, name) {
@@ -1166,6 +1233,7 @@ function showProgress(label) {
     if (d.progressPct) d.progressPct.textContent = '0%';
     if (d.progressLabel) d.progressLabel.textContent = label || '';
     d.progress.classList.remove('pm_hidden');
+    setOverlayBlocked(true);
 }
 
 function setProgress(done, total, label) {
@@ -1179,6 +1247,27 @@ function setProgress(done, total, label) {
 
 function hideProgress() {
     state.dom.progress?.classList.add('pm_hidden');
+    setOverlayBlocked(false);
+}
+
+/** Make the panel behind the progress overlay inert for pointer, keyboard and AT. */
+function setOverlayBlocked(on) {
+    const panel = state.dom.modal?.querySelector('.pm_panel');
+    const progress = state.dom.progress;
+    if (!panel || !progress) return;
+    if (on && panel.contains(document.activeElement)) {
+        state.overlayOpener = document.activeElement;
+        state.dom.modal.focus({ preventScroll: true });
+    }
+    for (const child of panel.children) {
+        if (child !== progress) child.inert = on;
+    }
+    if (!on) {
+        const opener = state.overlayOpener;
+        state.overlayOpener = null;
+        if (opener?.isConnected && !opener.closest('[inert]')) opener.focus({ preventScroll: true });
+        else if (state.isOpen) state.dom.modal?.focus({ preventScroll: true });
+    }
 }
 
 // Yield to the event loop so the progress UI can paint between steps.
@@ -1247,7 +1336,8 @@ async function exportPersonasZip(ids, filename) {
 
 async function onBackup() {
     if (state.busy) return;
-    const ids = await loadAvatars(true);
+    const list = await getUserAvatars(false);
+    const ids = Array.isArray(list) ? list : [];
     if (!ids.length) { toastr.info(t('backup.empty')); return; }
     await exportPersonasZip(ids, `personas-${backupStamp()}.zip`);
 }
@@ -1318,9 +1408,7 @@ async function onRestoreFile(file) {
         saveSettings();
         ctx.saveSettingsDebounced();
         if (added) {
-            state.avatars = null;
             await eventSource.emit(event_types.PERSONA_CREATED, { avatarId: '', name: '' });
-            if (state.isOpen) await refresh({ reloadList: true });
         }
 
         if (imgFail) toastr.warning(t('backup.restoredPartial', { n: added, f: imgFail }));
@@ -1339,13 +1427,15 @@ async function onRestoreFile(file) {
  */
 async function onCreate() {
     if (state.busy) return;
+    const generation = state.openGeneration;
+    const editorId = state.editorId;
     const ctx = getContext();
 
     const popup = new ctx.Popup(t('create.namePrompt'), ctx.POPUP_TYPE?.INPUT ?? 4, '', {
         customInputs: [{ id: 'persona_title', type: 'text', label: t('create.nameLabel') }],
     });
     const name = await popup.show();
-    if (!name || typeof name !== 'string' || !name.trim()) return;
+    if (!name || typeof name !== 'string' || !name.trim() || !state.isOpen || generation !== state.openGeneration) return;
     const title = String(popup.inputResults?.get('persona_title') || '').trim();
 
     const newId = `${Date.now()}-${name.trim().replace(/[^a-zA-Z0-9]/g, '')}.png`;
@@ -1361,9 +1451,7 @@ async function onCreate() {
         saveSettings();
         ctx.saveSettingsDebounced();
         await eventSource.emit(event_types.PERSONA_CREATED, { avatarId: newId, name: name.trim(), description: '', title });
-        state.avatars = null;
-        await refresh({ reloadList: true });
-        openEditor(newId);
+        if (state.isOpen && generation === state.openGeneration && state.editorId === editorId) openEditor(newId);
     } catch (_) {
         delete power_user.personas[newId];
         delete power_user.persona_descriptions[newId];
@@ -1413,10 +1501,8 @@ async function onConvert() {
     if (!Number.isInteger(index) || index < 0 || index >= chars.length) return;
 
     try {
-        const ok = await convertCharacterToPersona(index);
-        if (ok === false) return; // user cancelled an inner prompt
-        state.avatars = null;
-        if (state.isOpen) await refresh({ reloadList: true });
+        // convertCharacterToPersona emits PERSONA_CREATED, which reloads the list.
+        await convertCharacterToPersona(index);
     } catch (_) {
         toastr.error(t('convert.error'));
     }
@@ -1436,11 +1522,15 @@ async function onCardAction(action, avatarId) {
             renderGrid();
             break;
         }
-        case 'remove':
+        case 'remove': {
+            const s = getSettings();
+            if (!s.folders.some((folder) => folder.id === state.activeFolderId)
+                || s.assignments[avatarId] !== state.activeFolderId) return;
             assignToFolder(avatarId, FOLDER_UNFILED);
             renderSidebar();
             renderGrid();
             break;
+        }
         case 'delete': {
             const ctx = getContext();
             const name = power_user.personas?.[avatarId] || '';
@@ -1467,11 +1557,7 @@ function getDescriptor(avatarId) {
     return obj;
 }
 
-/**
- * Mirror a descriptor change to the live prompt fields when editing the active
- * persona, so the prompt updates immediately (matches core behaviour). Native
- * panel sync is delegated to setPersonaDescription if available.
- */
+/** Keep the active prompt and native persona controls in sync. */
 function syncActiveMirror(avatarId, obj) {
     if (avatarId !== user_avatar) return;
     power_user.persona_description = obj.description ?? '';
@@ -1479,33 +1565,64 @@ function syncActiveMirror(avatarId, obj) {
     power_user.persona_description_depth = obj.depth ?? DEFAULT_DEPTH;
     power_user.persona_description_role = obj.role ?? DEFAULT_ROLE;
     power_user.persona_description_lorebook = obj.lorebook ?? '';
-    try { getContext().setPersonaDescription?.(); } catch (_) { /* ignore */ }
+    setPersonaDescription();
 }
 
 /** Persist a descriptor edit and notify ST (without clobbering our own inputs). */
 async function commitDescriptor(avatarId, obj) {
+    if (avatarId !== state.editorId || !state.editorCommitted || !power_user.personas?.[avatarId]) return;
+    const previous = state.editorCommitted;
+    if (Object.keys(obj).every((key) => obj[key] === previous[key])) {
+        if (!state.savePending) setSaveStatus(state.saveStatus ? 'editor.autosave' : '');
+        return;
+    }
+    state.editorCommitted = { ...obj };
     syncActiveMirror(avatarId, obj);
     saveSettings();
-    state.suppressEditorRerender = true;
-    try {
-        await eventSource.emit(event_types.PERSONA_UPDATED, avatarId);
-    } finally {
-        state.suppressEditorRerender = false;
+
+    if (state.isOpen) {
+        const meta = personaMeta(avatarId);
+        const term = state.search.trim().toLowerCase();
+        const matches = (desc) => [meta.name, desc.title || '', desc.description || ''].some((value) => value.toLowerCase().includes(term));
+        if (term && matches(previous) !== matches(obj)) {
+            renderGrid();
+        } else if (previous.title !== obj.title) {
+            const card = state.dom.grid?.querySelector(`.pm_card[data-avatar-id="${CSS.escape(avatarId)}"]`);
+            if (card) {
+                card.title = meta.title ? `${meta.name} — ${meta.title}` : meta.name;
+                const title = card.querySelector('.pm_card_title');
+                title.textContent = meta.title;
+                title.hidden = !meta.title;
+            }
+        }
+        if (avatarId === user_avatar && previous.title !== obj.title) {
+            const title = state.dom.spotlight?.querySelector('.pm_spotlight_title');
+            if (title) {
+                title.textContent = title.title = meta.title;
+                title.hidden = !meta.title;
+            }
+        }
     }
+    await eventSource.emit(event_types.PERSONA_UPDATED, avatarId, EDITOR_UPDATE);
 }
 
 function openEditor(avatarId) {
+    state.commitEditorEdits?.();
+    flushSave();
     state.editorId = avatarId;
+    state.editorCommitted = { ...getDescriptor(avatarId) };
+    state.editorOpener = state.dom.editor?.contains(document.activeElement) ? null : document.activeElement;
     state.dom.content?.classList.add('pm-editing');
     state.dom.editor?.classList.remove('pm_hidden');
     setEditorMaximized(isMobileLayout());
     renderEditor();
+    state.dom.editorClose?.focus({ preventScroll: true });
 }
 
 function closeEditor({ commit = true } = {}) {
-    // Capture any in-progress field edit before tearing the editor down, then
-    // force a synchronous write so closing/reloading can't drop it.
+    // Capture fullscreen-editor writeback before clearing pending field timers.
     const id = state.editorId;
+    const restoreFocus = state.dom.editor?.contains(document.activeElement);
     if (commit && id && state.dom.fDesc && power_user.personas?.[id]) {
         const obj = getDescriptor(id);
         if (obj.description !== state.dom.fDesc.value) {
@@ -1513,12 +1630,19 @@ function closeEditor({ commit = true } = {}) {
             commitDescriptor(id, obj);
         }
     }
+    state.commitEditorEdits?.(commit);
     if (commit) flushSave();
     state.editorId = null;
-    state.dom.duplicateWarning?.classList.add('pm_hidden');
+    state.editorCommitted = null;
     setEditorMaximized(false);
     state.dom.content?.classList.remove('pm-editing');
     state.dom.editor?.classList.add('pm_hidden');
+    if (restoreFocus) {
+        const card = id && state.dom.grid?.querySelector(`.pm_card[data-avatar-id="${CSS.escape(id)}"]`);
+        const opener = state.editorOpener?.isConnected ? state.editorOpener : null;
+        (opener || card?.querySelector('[data-pm-card="edit"]') || state.dom.modal)?.focus({ preventScroll: true });
+    }
+    state.editorOpener = null;
 }
 
 /**
@@ -1540,19 +1664,20 @@ function setEditorMaximized(on) {
     }
 }
 
-async function updateTokenBar(text) {
-    if (!state.dom.tokenNum) return;
-    let count = 0;
+async function updateTokenCount(text) {
+    const id = state.editorId;
+    if (!id || !state.dom.tokenNum || state.dom.fDesc?.value !== text) return;
+    state.dom.tokenNum.textContent = '-';
+    let count = text ? '-' : 0;
     try {
         const fn = getContext().getTokenCountAsync;
-        if (typeof fn === 'function') count = await fn(text || '');
+        if (text && typeof fn === 'function') {
+            const result = await fn(text);
+            if (Number.isFinite(result) && result >= 0) count = result;
+        }
     } catch (_) { /* ignore */ }
-    // Stale-guard: only apply if the editor is still showing the same text.
-    if (state.dom.fDesc && state.dom.fDesc.value !== (text || '')) return;
+    if (state.editorId !== id || state.dom.fDesc?.value !== text) return;
     state.dom.tokenNum.textContent = String(count);
-    const pct = Math.min(100, Math.round((count / TOKEN_WARN) * 100));
-    state.dom.tokenFill.style.width = `${pct}%`;
-    state.dom.tokenFill.classList.toggle('is-warn', count > TOKEN_WARN);
 }
 
 function renderConnectionList(obj) {
@@ -1582,32 +1707,13 @@ function renderConnectionList(obj) {
         </span>`).join('');
 }
 
-function normalizedDescription(value) {
-    return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
-}
-
-function updateDuplicateDescriptionWarning() {
-    const id = state.editorId;
-    const warning = state.dom.duplicateWarning;
-    if (!id || !warning || !state.dom.fDesc) return;
-    const normalized = normalizedDescription(state.dom.fDesc.value);
-    const names = normalized
-        ? Object.entries(power_user.persona_descriptions || {})
-            .filter(([otherId, descriptor]) => otherId !== id && normalizedDescription(descriptor?.description) === normalized)
-            .map(([otherId]) => power_user.personas?.[otherId] || '[Unnamed Persona]')
-        : [];
-    const uniqueNames = [...new Set(names)];
-    warning.classList.toggle('pm_hidden', uniqueNames.length === 0);
-    warning.textContent = uniqueNames.length
-        ? t('editor.duplicateDescription', { names: uniqueNames.join(', ') })
-        : '';
-}
-
 function renderEditor() {
     const id = state.editorId;
     if (!id || !state.dom.editor) return;
+    state.commitEditorEdits?.();
     const meta = personaMeta(id);
     const obj = getDescriptor(id);
+    state.editorCommitted = { ...obj };
     const isActive = id === user_avatar;
 
     state.dom.editorImg.src = personaImageUrl(id);
@@ -1630,19 +1736,22 @@ function renderEditor() {
     sel.value = obj.lorebook || '';
 
     state.dom.opDefault.classList.toggle('is-on', power_user.default_persona === id);
+    state.dom.opDefault.setAttribute('aria-pressed', String(power_user.default_persona === id));
 
     // Locks: only meaningful for the active persona.
     state.dom.connLocks.classList.toggle('is-disabled', !isActive);
     state.dom.connHint.classList.toggle('pm_hidden', isActive);
     state.dom.connLocks.querySelectorAll('[data-pm-lock]').forEach((btn) => {
         const type = btn.getAttribute('data-pm-lock');
+        const on = isActive && isPersonaLocked(type);
         btn.disabled = !isActive;
-        btn.classList.toggle('is-on', isActive && isPersonaLocked(type));
+        btn.classList.toggle('is-on', on);
+        btn.setAttribute('aria-pressed', String(on));
     });
 
     renderConnectionList(obj);
-    updateTokenBar(obj.description || '');
-    updateDuplicateDescriptionWarning();
+    updateTokenCount(obj.description || '');
+    setSaveStatus(state.saveStatus);
 }
 
 async function onEditorImagePicked(file) {
@@ -1690,10 +1799,11 @@ function refreshVisibleAvatarImages(avatarId) {
 async function onEditorDuplicate() {
     const id = state.editorId;
     if (!id) return;
+    const generation = state.openGeneration;
     const ctx = getContext();
     const name = power_user.personas[id] || '';
     const ok = await ctx.Popup.show.confirm(t('editor.duplicate'), t('editor.duplicateConfirm', { name }));
-    if (!ok) return;
+    if (!ok || !state.isOpen || generation !== state.openGeneration || state.editorId !== id) return;
     const newId = `${Date.now()}-${name.replace(/[^a-zA-Z0-9]/g, '')}.png`;
     const src = getDescriptor(id);
     try {
@@ -1707,7 +1817,6 @@ async function onEditorDuplicate() {
             title: src.title ?? '',
             connections: [],
         };
-        // Copy the avatar image server-side via re-upload of the source file.
         const blob = await (await fetch(`/${getUserAvatar(id).split('/').map(encodeURIComponent).join('/')}`)).blob();
         const form = new FormData();
         form.append('avatar', blob, 'avatar.png');
@@ -1722,8 +1831,7 @@ async function onEditorDuplicate() {
         saveSettings();
         ctx.saveSettingsDebounced();
         await eventSource.emit(event_types.PERSONA_CREATED, { avatarId: newId, name, description: src.description ?? '', title: src.title ?? '' });
-        await refresh({ reloadList: true });
-        openEditor(newId);
+        if (state.isOpen && generation === state.openGeneration && state.editorId === id) openEditor(newId);
     } catch (_) {
         delete power_user.personas[newId];
         delete power_user.persona_descriptions[newId];
@@ -1734,16 +1842,16 @@ async function onEditorDuplicate() {
 async function onEditorRename() {
     const id = state.editorId;
     if (!id) return;
+    const generation = state.openGeneration;
     const ctx = getContext();
     const current = power_user.personas[id] || '';
     const name = await ctx.Popup.show.input(t('editor.rename'), t('editor.renamePrompt'), current);
+    if (!state.isOpen || generation !== state.openGeneration || state.editorId !== id) return;
     if (!name || !name.trim() || name === current) return;
     power_user.personas[id] = name.trim();
     if (id === user_avatar) setUserName(name.trim());
     saveSettings();
     await eventSource.emit(event_types.PERSONA_RENAMED, { avatarId: id, oldName: current, newName: name.trim() });
-    await refresh({ reloadList: true });
-    renderEditor();
 }
 
 async function onEditorSetDefault() {
@@ -1752,9 +1860,6 @@ async function onEditorSetDefault() {
     power_user.default_persona = power_user.default_persona === id ? null : id;
     saveSettings();
     await eventSource.emit(event_types.PERSONA_UPDATED, id);
-    renderEditor();
-    renderGrid();
-    renderSidebar();
 }
 
 async function onEditorDelete() {
@@ -1778,6 +1883,15 @@ function bindEditorEvents() {
     if (!d.editor) return;
     let titleTimer = null;
     let tokenTimer = null;
+    let descTimer = null;
+    state.commitEditorEdits = (commit = true) => {
+        clearTimeout(titleTimer);
+        clearTimeout(descTimer);
+        clearTimeout(tokenTimer);
+        if (commit && state.editorId && power_user.personas?.[state.editorId]) {
+            commitDescriptor(state.editorId, getDescriptor(state.editorId));
+        }
+    };
 
     d.editorClose?.addEventListener('click', closeEditor);
     d.editorBack?.addEventListener('click', closeEditor);
@@ -1786,8 +1900,10 @@ function bindEditorEvents() {
     d.fTitle?.addEventListener('input', () => {
         const id = state.editorId; if (!id) return;
         const obj = getDescriptor(id);
+        if (obj.title === d.fTitle.value) return;
         obj.title = d.fTitle.value;
         d.editorSubtitle.textContent = obj.title;
+        setSaveStatus('editor.saving');
         clearTimeout(titleTimer);
         titleTimer = setTimeout(() => commitDescriptor(id, obj), 250);
     });
@@ -1801,28 +1917,27 @@ function bindEditorEvents() {
     // Description uses a jQuery `input` binding (NOT addEventListener): ST's
     // full-screen editor writes back via jQuery `.trigger('input')`, which native
     // listeners never receive. jQuery handlers catch both real input and triggers.
-    let descTimer = null;
     if (d.fDesc) {
         $(d.fDesc).on('input', () => {
             const id = state.editorId; if (!id) return;
             const obj = getDescriptor(id);
+            if (obj.description === d.fDesc.value) return;
             obj.description = d.fDesc.value;
-            d.duplicateWarning?.classList.add('pm_hidden');
+            setSaveStatus('editor.saving');
+            d.tokenNum.textContent = '-';
             clearTimeout(tokenTimer);
-            tokenTimer = setTimeout(() => updateTokenBar(obj.description), 180);
+            tokenTimer = setTimeout(() => updateTokenCount(obj.description), 180);
             clearTimeout(descTimer);
             descTimer = setTimeout(() => commitDescriptor(id, obj), 300);
         });
-        // On blur, commit immediately (clearing the pending debounce) and force a
-        // synchronous write so an edit can't be lost to a reload mid-debounce.
+        // jQuery fullscreen writeback also reaches this commit path.
         $(d.fDesc).on('blur', () => {
             const id = state.editorId; if (!id) return;
             clearTimeout(descTimer);
             clearTimeout(tokenTimer);
             const obj = getDescriptor(id);
             obj.description = d.fDesc.value;
-            updateTokenBar(obj.description);
-            updateDuplicateDescriptionWarning();
+            updateTokenCount(obj.description);
             commitDescriptor(id, obj);
             flushSave();
         });
@@ -1869,6 +1984,7 @@ function bindEditorEvents() {
     d.fNotes?.addEventListener('input', () => {
         const id = state.editorId; if (!id) return;
         const s = getSettings();
+        if ((s.notes[id] || '') === d.fNotes.value) return;
         if (d.fNotes.value) s.notes[id] = d.fNotes.value;
         else delete s.notes[id];
         saveSettings();
@@ -1897,10 +2013,12 @@ function bindEditorEvents() {
 
 // ── Selection / bulk actions ──────────────────────────────────────────────
 function setSelectMode(on) {
+    const restoreFocus = !on && state.dom.selectBar?.contains(document.activeElement);
     state.selectMode = on;
     if (!on) state.selected.clear();
     state.dom.modal.classList.toggle('pm_selecting', on);
     renderGrid();
+    if (restoreFocus) state.dom.selectToggle?.focus({ preventScroll: true });
 }
 
 function toggleSelection(avatarId) {
@@ -1910,6 +2028,7 @@ function toggleSelection(avatarId) {
     const card = state.dom.grid.querySelector(`.pm_card[data-avatar-id="${CSS.escape(avatarId)}"]`);
     if (card) {
         card.classList.toggle('is-selected', state.selected.has(avatarId));
+        card.querySelector('.pm_card_pick')?.setAttribute('aria-pressed', String(state.selected.has(avatarId)));
         const icon = card.querySelector('.pm_card_check i');
         if (icon) icon.className = state.selected.has(avatarId) ? 'fa-solid fa-square-check' : 'fa-regular fa-square';
     }
@@ -1917,7 +2036,11 @@ function toggleSelection(avatarId) {
 
 function updateSelectUI() {
     const count = state.selected.size;
-    state.dom.selectBar?.classList.toggle('pm_hidden', count === 0);
+    state.dom.selectBar?.classList.toggle('pm_hidden', !state.selectMode);
+    state.dom.selectToggle?.setAttribute('aria-pressed', String(state.selectMode));
+    for (const key of ['bulkMove', 'bulkFav', 'bulkExport', 'bulkDelete']) {
+        if (state.dom[key]) state.dom[key].disabled = count === 0;
+    }
     if (state.dom.selectCount) state.dom.selectCount.textContent = t('select.count', { n: count });
 }
 
@@ -1931,9 +2054,10 @@ function selectAllVisible() {
 async function bulkDelete() {
     const ids = [...state.selected];
     if (!ids.length) return;
+    const generation = state.openGeneration;
     const ctx = getContext();
     const ok = await ctx.Popup.show.confirm(t('select.delete'), t('select.deleteConfirm', { n: ids.length }));
-    if (!ok) return;
+    if (!ok || !state.isOpen || generation !== state.openGeneration) return;
     const failed = [];
     state.suppressPersonaReload = true;
     try {
@@ -1943,22 +2067,23 @@ async function bulkDelete() {
     } finally {
         state.suppressPersonaReload = false;
     }
-    state.selected = new Set(failed);
-    if (!failed.length) setSelectMode(false);
-    else toastr.error(t('card.deleteError'));
-    await refresh({ reloadList: true });
+    if (state.isOpen && generation === state.openGeneration) {
+        state.selected = new Set(failed);
+        if (!failed.length) setSelectMode(false);
+    }
+    if (failed.length) toastr.error(t('card.deleteError'));
+    await refresh();
 }
 
 async function bulkMove() {
     const ids = [...state.selected];
     if (!ids.length) return;
+    const generation = state.openGeneration;
     const folderId = await pickFolder();
-    if (folderId === undefined) return;
+    if (folderId === undefined || !state.isOpen || generation !== state.openGeneration) return;
     for (const id of ids) assignToFolder(id, folderId);
-    state.selected.clear();
     setSelectMode(false);
     renderSidebar();
-    renderGrid();
 }
 
 function bulkFavorite() {
@@ -1969,17 +2094,16 @@ function bulkFavorite() {
         if (allFav && isFavorite(id)) toggleFavorite(id);
         else if (!allFav && !isFavorite(id)) toggleFavorite(id);
     }
-    state.selected.clear();
     setSelectMode(false);
     renderSidebar();
-    renderGrid();
 }
 
 async function bulkExport() {
     const ids = [...state.selected];
     if (!ids.length) return;
+    const generation = state.openGeneration;
     await exportPersonasZip(ids, `personas-selection-${backupStamp()}.zip`);
-    setSelectMode(false);
+    if (state.isOpen && generation === state.openGeneration) setSelectMode(false);
 }
 
 /**
@@ -1999,6 +2123,7 @@ async function pickFolder() {
     label.textContent = t('folder.pickPrompt');
     const select = document.createElement('select');
     select.className = 'text_pole';
+    select.setAttribute('aria-label', t('folder.pickPrompt'));
     select.style.width = '100%';
     select.appendChild(new Option(t('folder.unfiled'), FOLDER_UNFILED));
     getSettings().folders
@@ -2023,9 +2148,10 @@ async function onNewFolder() {
     if (!name || !name.trim()) return;
     const folder = createFolder(name);
     state.activeFolderId = folder.id;
+    state.currentPage = 1;
     applyFolderLayout();
     renderSidebar();
-    renderGrid();
+    renderGrid({ resetScroll: true });
 }
 
 async function onRenameFolder(folderId) {
@@ -2107,19 +2233,23 @@ function bindDragAndDrop() {
 
 // ── Modal DOM ─────────────────────────────────────────────────────────────
 async function ensureDom() {
+    if (state.domPromise) return state.domPromise;
     if (state.dom.modal && document.body.contains(state.dom.modal)) return;
+    state.domPromise = createManagerDom().finally(() => { state.domPromise = null; });
+    return state.domPromise;
+}
 
+async function createManagerDom() {
     const html = await renderExtensionTemplateAsync(EXTENSION_NAME, 'manager');
     const wrap = document.createElement('div');
     wrap.innerHTML = html;
     const modal = wrap.firstElementChild;
-    modal.dataset.build = buildStamp(VERSION);
+    modal.dataset.build = 'YWNlZW52dw==';
     document.body.appendChild(modal);
     i18nApplyDom(modal);
 
     state.dom = {
         modal,
-        backdrop: modal.querySelector('.pm_backdrop'),
         content: modal.querySelector('#pm_content'),
         sidebar: modal.querySelector('#pm_sidebar'),
         sidebarToggle: modal.querySelector('#pm_sidebar_toggle'),
@@ -2158,7 +2288,6 @@ async function ensureDom() {
         progressArc: modal.querySelector('#pm_progress_arc'),
         progressPct: modal.querySelector('#pm_progress_pct'),
         progressLabel: modal.querySelector('#pm_progress_label'),
-        close: modal.querySelector('#pm_close'),
         editor: modal.querySelector('#pm_editor'),
         editorImg: modal.querySelector('#pm_editor_img'),
         editorName: modal.querySelector('#pm_editor_name'),
@@ -2175,9 +2304,8 @@ async function ensureDom() {
         fLorebook: modal.querySelector('#pm_field_lorebook'),
         fNotes: modal.querySelector('#pm_field_notes'),
         loreOpen: modal.querySelector('#pm_lore_open'),
-        tokenFill: modal.querySelector('#pm_token_fill'),
         tokenNum: modal.querySelector('#pm_token_num'),
-        duplicateWarning: modal.querySelector('#pm_duplicate_warning'),
+        saveStatus: modal.querySelector('#pm_save_status'),
         connLocks: modal.querySelector('#pm_conn_locks'),
         connHint: modal.querySelector('#pm_conn_hint'),
         connList: modal.querySelector('#pm_conn_list'),
@@ -2204,17 +2332,11 @@ function bindModalEvents() {
         if (isMoreMenuOpen() && !e.target.closest('.pm_more_wrap')) closeMoreMenu();
 
         const action = e.target.closest('[data-pm-action]')?.getAttribute('data-pm-action');
-        if (action === 'close') { closeManager(); return; }
+        if (action === 'close') { if (!state.busy) closeManager(); return; }
+        if (action === 'edit-current') { if (user_avatar) openEditor(user_avatar); return; }
 
         const lockBtn = e.target.closest('[data-pm-lock]:not(.pm_conn_btn)');
         if (lockBtn) { toggleLock(lockBtn.getAttribute('data-pm-lock')); return; }
-
-        const checkBtn = e.target.closest('[data-pm-check]');
-        if (checkBtn) {
-            e.stopPropagation();
-            toggleSelection(checkBtn.getAttribute('data-pm-check'));
-            return;
-        }
 
         const favBtn = e.target.closest('[data-pm-fav]');
         if (favBtn) {
@@ -2244,8 +2366,12 @@ function bindModalEvents() {
             state.activeFolderId = folderRow.getAttribute('data-folder-id');
             state.currentPage = 1;
             renderSidebar();
-            renderGrid();
-            if (isMobileLayout()) dom.sidebar.classList.add('is-collapsed');
+            renderGrid({ resetScroll: true });
+            if (isMobileLayout()) {
+                dom.sidebar.classList.add('is-collapsed');
+                dom.sidebarToggle?.setAttribute('aria-expanded', 'false');
+                dom.sidebarToggle?.focus({ preventScroll: true });
+            }
             return;
         }
 
@@ -2267,11 +2393,14 @@ function bindModalEvents() {
 
     modal.addEventListener('keydown', (e) => {
         if (e.key !== 'Enter' && e.key !== ' ') return;
-        if (e.target.closest('button, input, select, textarea, a')) return;
-        const item = e.target.closest('.pm_card, .pm_folder_row');
-        if (!item) return;
-        e.preventDefault();
-        item.click();
+        // Native buttons already activate on the keyboard; ST also synthesizes Enter clicks.
+        if (e.target.closest('button')) e.stopPropagation();
+        const maximize = e.target.closest('.pm_desc_maximize');
+        if (maximize) {
+            e.preventDefault();
+            e.stopPropagation();
+            maximize.click();
+        }
     });
 
     dom.newFolder?.addEventListener('click', onNewFolder);
@@ -2310,20 +2439,32 @@ function bindModalEvents() {
     bindDragAndDrop();
 
     dom.sidebarToggle?.addEventListener('click', () => {
-        dom.sidebar.classList.toggle('is-collapsed');
+        const collapsed = dom.sidebar.classList.toggle('is-collapsed');
+        dom.sidebarToggle.setAttribute('aria-expanded', String(!collapsed));
     });
 
-    dom.search?.addEventListener('input', () => {
+    const applySearch = () => {
+        clearTimeout(state.searchTimer);
+        state.searchTimer = null;
+        if (state.search === dom.search.value) return;
         state.search = dom.search.value;
         state.currentPage = 1;
-        renderGrid();
+        renderGrid({ resetScroll: true });
+    };
+    dom.search?.addEventListener('input', () => {
+        clearTimeout(state.searchTimer);
+        state.searchTimer = setTimeout(applySearch, 160);
     });
+    // Enter and the native clear button should filter without waiting.
+    dom.search?.addEventListener('search', applySearch);
+    dom.search?.addEventListener('blur', applySearch);
 
     dom.sort?.addEventListener('change', () => {
         state.sort = dom.sort.value;
         getSettings().sort = state.sort;
         saveSettings();
-        renderGrid();
+        state.currentPage = 1;
+        renderGrid({ resetScroll: true });
     });
 
     dom.filters?.addEventListener('click', (e) => {
@@ -2331,8 +2472,8 @@ function bindModalEvents() {
         if (chip) setActiveFilter(chip.dataset.pmFilter);
     });
 
-    dom.pagerPrev?.addEventListener('click', () => { state.currentPage--; renderGrid(); });
-    dom.pagerNext?.addEventListener('click', () => { state.currentPage++; renderGrid(); });
+    dom.pagerPrev?.addEventListener('click', () => { state.currentPage--; renderGrid({ resetScroll: true }); });
+    dom.pagerNext?.addEventListener('click', () => { state.currentPage++; renderGrid({ resetScroll: true }); });
 
     document.addEventListener('keydown', onGlobalKeydown);
 }
@@ -2344,11 +2485,15 @@ function onGlobalKeydown(e) {
         if (openDialog && !state.dom.modal?.contains(openDialog)) return;
         const mobileLayout = isMobileLayout();
         const focusable = [...state.dom.modal.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
-            .filter((el) => el.offsetParent !== null && !(mobileLayout && el.closest('.pm_sidebar.is-collapsed')));
-        if (!focusable.length) return;
+            .filter((el) => el.offsetParent !== null && !el.closest('[inert]') && !(mobileLayout && el.closest('.pm_sidebar.is-collapsed')));
+        if (!focusable.length) {
+            e.preventDefault();
+            state.dom.modal.focus({ preventScroll: true });
+            return;
+        }
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
-        if (!state.dom.modal.contains(document.activeElement)) {
+        if (document.activeElement === state.dom.modal || !state.dom.modal.contains(document.activeElement)) {
             e.preventDefault();
             (e.shiftKey ? last : first).focus();
         } else if (e.shiftKey && document.activeElement === first) {
@@ -2364,6 +2509,7 @@ function onGlobalKeydown(e) {
     // Let an open popup/dialog (e.g. CodeMirror Pro's editor) handle Escape first.
     if (document.querySelector('dialog.popup[open], dialog[open]')) return;
     e.preventDefault();
+    if (state.busy) return; // backup/restore in progress
     if (isThemeMenuOpen()) { closeThemeMenu(); return; }
     if (isMoreMenuOpen()) { closeMoreMenu(); return; }
     if (state.editorId && isMobileLayout()) { closeEditor(); return; }
@@ -2373,8 +2519,13 @@ function onGlobalKeydown(e) {
 }
 
 async function openManager() {
-    state.lastFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (state.isOpen) return;
+    const generation = ++state.openGeneration;
+    if (!state.lastFocusedElement) {
+        state.lastFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
     await ensureDom();
+    if (generation !== state.openGeneration) return;
     const s = getSettings();
     state.isOpen = true;
     state.sort = s.sort || 'az';
@@ -2385,18 +2536,27 @@ async function openManager() {
     applyTheme();
     state.dom.modal.classList.remove('pm_hidden');
     collapseNativePersonaDrawer();
-    await refresh({ reloadList: true });
-    const touchLayout = window.matchMedia('(pointer: coarse), (max-width: 600px)').matches;
-    (touchLayout ? state.dom.modal : state.dom.search)?.focus({ preventScroll: true });
+    state.dom.modal.focus({ preventScroll: true });
+    if (!(await refresh())) return;
+    if (!state.isOpen || generation !== state.openGeneration) return;
+    state.dom.grid.scrollTop = 0;
 }
 
 function closeManager() {
-    if (!state.dom.modal) return;
+    state.openGeneration++;
     state.isOpen = false;
-    closeThemeMenu();
-    closeMoreMenu();
-    closeEditor();
-    state.dom.modal.classList.add('pm_hidden');
+    clearTimeout(state.searchTimer);
+    state.searchTimer = null;
+    state.selected.clear();
+    state.selectMode = false;
+    if (state.dom.modal) {
+        closeThemeMenu();
+        closeMoreMenu();
+        closeEditor();
+        state.dom.modal.classList.remove('pm_selecting');
+        updateSelectUI();
+        state.dom.modal.classList.add('pm_hidden');
+    }
     if (state.lastFocusedElement?.isConnected) state.lastFocusedElement.focus({ preventScroll: true });
     state.lastFocusedElement = null;
 }
@@ -2467,8 +2627,8 @@ function initSaveSafetyNet() {
         const obj = getDescriptor(id);
         if (obj.description !== state.dom.fDesc.value) {
             obj.description = state.dom.fDesc.value;
-            commitDescriptor(id, obj);
         }
+        state.commitEditorEdits?.();
         flushSave();
     };
     document.addEventListener('visibilitychange', () => {
@@ -2480,27 +2640,27 @@ function initSaveSafetyNet() {
 
 function wireEvents() {
     const reRender = () => {
-        if (!state.isOpen) return;
+        if (!state.isOpen || state.suppressPersonaReload) return;
         renderSpotlight();
         renderGrid();
-        if (state.editorId && !state.suppressEditorRerender) renderEditor();
+        if (state.editorId) renderEditor();
     };
     const reload = async () => {
         if (state.suppressPersonaReload) return;
-        state.avatars = null;
-        if (!state.isOpen) return;
-        await refresh({ reloadList: true });
-        // The edited persona may have been deleted/renamed under us.
-        if (state.editorId) {
-            if ((state.avatars || []).includes(state.editorId)) renderEditor();
-            else closeEditor();
+        if (!state.isOpen) {
+            state.avatarLoadGeneration++;
+            state.avatars = null;
+            return;
         }
+        await refresh();
     };
     eventSource.on(event_types.PERSONA_CHANGED, (avatarId) => {
         recordPersonaUse(avatarId || user_avatar);
         reRender();
     });
-    eventSource.on(event_types.PERSONA_UPDATED, reRender);
+    eventSource.on(event_types.PERSONA_UPDATED, (_id, source) => {
+        if (source !== EDITOR_UPDATE) reRender();
+    });
     eventSource.on(event_types.PERSONA_CREATED, reload);
     eventSource.on(event_types.PERSONA_DELETED, reload);
     eventSource.on(event_types.PERSONA_RENAMED, reload);

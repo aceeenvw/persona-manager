@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none" stroke="#f5b82e" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+  <defs>
+    <path id="corner" d="M4 8Q4 4 8 4"/>
+    <path id="edge" d="M8 4L11 2.5Q12 2 13 2.5L19 5.5Q20 6 21 5.5L24 4"/>
+  </defs>
+  <use href="#corner"/>
+  <use href="#corner" transform="rotate(90 16 16)"/>
+  <use href="#corner" transform="rotate(180 16 16)"/>
+  <use href="#corner" transform="rotate(270 16 16)"/>
+  <use href="#edge"/>
+  <use href="#edge" transform="rotate(90 16 16)"/>
+  <use href="#edge" transform="rotate(180 16 16)"/>
+  <use href="#edge" transform="rotate(270 16 16)"/>
+</svg>

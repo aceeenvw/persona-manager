@@ -1,6 +1,4 @@
-/* ⊹ PERSONA MANAGER ⊹ — theme-aware styling.
- * Signature: the panel only renders fully when [data-build] is present (set in
- * JS from the aceenvw build stamp); removing it strips the panel chrome. */
+/* Persona Manager: theme-aware styling. */
 
 :root {
     --pm-surface: color-mix(in srgb, var(--SmartThemeBlurTintColor, rgba(18, 18, 20, 0.96)) 88%, rgba(255, 255, 255, 0.03) 12%);
@@ -9,19 +7,13 @@
     --pm-border: color-mix(in srgb, var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.16)) 80%, rgba(255, 255, 255, 0.12) 20%);
     --pm-accent: var(--SmartThemeQuoteColor, #6aa9ff);
     --pm-accent-soft: color-mix(in srgb, var(--SmartThemeQuoteColor, #6aa9ff) 18%, var(--SmartThemeBlurTintColor, rgba(18, 18, 20, 0.98)) 82%);
-    --pm-accent-muted: color-mix(in srgb, var(--pm-accent) 70%, var(--pm-surface) 30%);
     --pm-text: var(--SmartThemeBodyColor, #f2f0eb);
     --pm-muted: color-mix(in srgb, var(--SmartThemeBodyColor, #f2f0eb) 64%, var(--SmartThemeEmColor, #9b9b9b) 36%);
     --pm-danger: #e06464;
     --pm-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
-    --pm-radius: 16px;
 }
 
-/* ── Override themes ──
- * Each theme re-skins the whole modal by overriding the --pm-* tokens, scoped
- * to a [data-theme] attribute on #pm_modal. "native" carries no attribute and
- * keeps the SmartTheme-derived defaults above (so existing setups are unchanged
- * and the [data-build] signature gate is untouched). */
+/* Override themes; native uses the host-derived defaults above. */
 .pm_modal[data-theme="github-dark"] {
     --pm-surface: #0d1117;
     --pm-surface-strong: #11161d;
@@ -29,21 +21,24 @@
     --pm-border: #30363d;
     --pm-accent: #58a6ff;
     --pm-accent-soft: color-mix(in srgb, #58a6ff 18%, #0d1117 82%);
-    --pm-accent-muted: color-mix(in srgb, #58a6ff 70%, #0d1117 30%);
     --pm-text: #c9d1d9;
     --pm-muted: #8b949e;
     --pm-danger: #f85149;
     --pm-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
 }
 
+.pm_modal[data-theme]:not([data-theme="light"]) {
+    color-scheme: dark;
+}
+
 .pm_modal[data-theme="light"] {
+    color-scheme: light;
     --pm-surface: #ffffff;
     --pm-surface-strong: #f6f8fa;
     --pm-surface-soft: #eaeef2;
     --pm-border: #d0d7de;
     --pm-accent: #0969da;
     --pm-accent-soft: color-mix(in srgb, #0969da 12%, #ffffff 88%);
-    --pm-accent-muted: color-mix(in srgb, #0969da 70%, #ffffff 30%);
     --pm-text: #1f2328;
     --pm-muted: #59636e;
     --pm-danger: #cf222e;
@@ -61,9 +56,8 @@
     --pm-border: #44475a;
     --pm-accent: #bd93f9;
     --pm-accent-soft: color-mix(in srgb, #bd93f9 18%, #282a36 82%);
-    --pm-accent-muted: color-mix(in srgb, #bd93f9 70%, #282a36 30%);
     --pm-text: #f8f8f2;
-    --pm-muted: #9aa0bd;
+    --pm-muted: #a7aecb;
     --pm-danger: #ff5555;
     --pm-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
 }
@@ -75,9 +69,8 @@
     --pm-border: #14505d;
     --pm-accent: #268bd2;
     --pm-accent-soft: color-mix(in srgb, #268bd2 18%, #002b36 82%);
-    --pm-accent-muted: color-mix(in srgb, #268bd2 70%, #002b36 30%);
-    --pm-text: #93a1a1;
-    --pm-muted: #6b8487;
+    --pm-text: #aab8b8;
+    --pm-muted: #aab8b8;
     --pm-danger: #dc322f;
     --pm-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
 }
@@ -89,27 +82,61 @@
     --pm-border: #434c5e;
     --pm-accent: #88c0d0;
     --pm-accent-soft: color-mix(in srgb, #88c0d0 18%, #2e3440 82%);
-    --pm-accent-muted: color-mix(in srgb, #88c0d0 70%, #2e3440 30%);
     --pm-text: #e5e9f0;
-    --pm-muted: #9aa4b8;
+    --pm-muted: #a8b2c6;
     --pm-danger: #bf616a;
     --pm-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
 }
 
-/* ── Native control theming (scoped to the modal) ──
- * The manager reuses ST's .menu_button / .text_pole classes, which ST (and
- * especially custom user themes) color from their own vars — often with
- * !important on .menu_button/select/input/textarea. To make these controls
- * follow the active manager theme we re-skin them with the --pm-* tokens and
- * use !important to win over such theme rules. Scoped under .pm_panel so it
- * never leaks to ST's own UI or to ST popups (pickFolder/convert) outside the
- * modal. Our .pm_panel-prefixed selectors out-specify the bare theme ones, so
- * the override is reliable. */
+/* Scoped !important overrides keep host control styles out of the modal. */
 .pm_panel .menu_button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-width: 36px;
+    min-height: 36px;
+    margin: 0;
+    padding: 7px 10px;
+    border-radius: 9px;
+    font-size: 0.82rem;
+    line-height: 1;
     background-color: var(--pm-surface-strong) !important;
     color: var(--pm-text) !important;
     border-color: var(--pm-border) !important;
     filter: none !important;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.pm_panel button {
+    font-family: inherit;
+    touch-action: manipulation;
+}
+
+.pm_panel button > i,
+.pm_folder_icon {
+    flex: 0 0 auto;
+    width: 1.25em;
+    text-align: center;
+    line-height: 1;
+    pointer-events: none;
+}
+
+.pm_panel :is(button, input, select, textarea, [tabindex]):focus-visible,
+.persona-manager-settings :is(button, input, select):focus-visible {
+    outline: 2px solid var(--pm-accent);
+    outline-offset: 2px;
+}
+
+.pm_panel button:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.pm_panel .menu_button[aria-pressed="true"] {
+    background-color: var(--pm-accent-soft) !important;
+    border-color: var(--pm-accent) !important;
+    color: var(--pm-accent) !important;
 }
 
 .pm_panel .menu_button:not(.disabled):not([disabled]):hover,
@@ -119,9 +146,15 @@
 }
 
 .pm_panel .text_pole {
+    border-radius: 9px;
+    padding: 8px 10px;
     background-color: var(--pm-surface) !important;
     color: var(--pm-text) !important;
     border-color: var(--pm-border) !important;
+}
+
+.pm_panel select.text_pole {
+    padding-right: 24px;
 }
 
 .pm_panel .text_pole::placeholder {
@@ -144,7 +177,7 @@
 /* ── Settings panel (extensions tab) ── */
 .persona-manager-settings .pm_settings_card {
     margin-top: 6px;
-    padding: 14px;
+    padding: 12px;
     border: 1px solid var(--pm-border);
     border-radius: 14px;
     background:
@@ -157,7 +190,7 @@
 }
 
 .persona-manager-settings .pm_settings_intro {
-    margin: 0 0 12px;
+    margin: 0 0 8px;
     font-size: 0.84em;
     line-height: 1.5;
     color: var(--pm-muted);
@@ -170,7 +203,7 @@
     gap: 8px;
     width: 100%;
     padding: 9px 14px;
-    margin: 0 0 14px;
+    margin: 0 0 10px;
     cursor: pointer;
     font-weight: 600;
     border-radius: 999px;
@@ -189,11 +222,11 @@
 }
 
 .persona-manager-settings .pm_settings_section {
-    margin-top: 12px;
+    margin-top: 8px;
 }
 
 .persona-manager-settings .pm_settings_heading {
-    margin: 0 0 8px;
+    margin: 0 0 6px;
     font-size: 0.72em;
     font-weight: 700;
     text-transform: uppercase;
@@ -234,6 +267,13 @@
     min-width: 0;
 }
 
+.persona-manager-settings .pm_set_control {
+    flex: 0 1 130px;
+    min-width: 80px;
+    width: auto;
+    margin: 0;
+}
+
 .persona-manager-settings .pm_set_label {
     font-size: 0.9em;
     line-height: 1.35;
@@ -246,11 +286,17 @@
 }
 
 /* ── Modal shell ── */
-.pm_modal {
+.pm_modal[data-build="YWNlZW52dw=="] {
     position: fixed;
     inset: 0;
     z-index: 3000;
     color: var(--pm-text);
+}
+
+.pm_modal,
+.pm_modal * {
+    box-sizing: border-box;
+    text-shadow: none;
 }
 
 .pm_backdrop {
@@ -267,7 +313,7 @@
     flex-direction: column;
     gap: 12px;
     width: min(1400px, calc(100vw - 28px));
-    height: min(880px, calc(100vh - var(--topBarBlockSize, 0px) - 24px));
+    height: min(880px, calc(100dvh - var(--topBarBlockSize, 0px) - 24px));
     margin: calc(var(--topBarBlockSize, 0px) + 8px) auto 16px;
     padding: 16px;
     border: 1px solid var(--pm-border);
@@ -281,34 +327,19 @@
     container-name: pm-panel;
 }
 
-/* Signature gate: without the JS-set build stamp, the panel chrome collapses. */
-.pm_modal[data-build=""] .pm_panel {
-    background: none;
-    border: none;
-    box-shadow: none;
+.pm_toolbar_actions > .menu_button,
+.pm_more_menu > .menu_button {
+    width: 36px;
+    padding-inline: 0;
 }
 
-.pm_header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-    flex-shrink: 0;
+.pm_panel #pm_create {
+    color: var(--pm-accent) !important;
+    border-color: color-mix(in srgb, var(--pm-accent) 50%, var(--pm-border)) !important;
+    background-color: var(--pm-accent-soft) !important;
 }
 
-.pm_header_copy h2 {
-    margin: 0;
-    font-size: 1.05rem;
-    line-height: 1.2;
-}
-
-.pm_header_copy p {
-    margin: 2px 0 0;
-    font-size: 0.78rem;
-    color: var(--pm-muted);
-}
-
-.pm_header_actions {
+.pm_toolbar_actions {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -333,15 +364,14 @@
 .pm_content {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    gap: 14px;
+    gap: 10px;
     flex: 1 1 auto;
     min-height: 0;
     position: relative;
 }
 
-/* Sidebar only appears once folders exist (added in a later step). */
 .pm_content.has-folders {
-    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+    grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
 }
 
 /* Editor opens as a 3rd column (or 2nd, when there are no folders). */
@@ -350,7 +380,7 @@
 }
 
 .pm_content.has-folders.pm-editing {
-    grid-template-columns: minmax(200px, 260px) minmax(0, 1fr) minmax(320px, 420px);
+    grid-template-columns: minmax(170px, 200px) minmax(0, 1fr) minmax(300px, 380px);
 }
 
 .pm_sidebar {
@@ -358,7 +388,7 @@
     overflow-y: auto;
     overscroll-behavior: contain;
     min-height: 0;
-    padding: 12px;
+    padding: 8px;
     border: 1px solid var(--pm-border);
     border-radius: 18px;
     background: var(--pm-surface-strong);
@@ -374,29 +404,41 @@
     gap: 10px;
     min-width: 0;
     min-height: 0;
+    flex: 1 1 auto;
 }
 
 .pm_grid {
+    --pm-grid-gap: 12px;
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(min(144px, 100%), 1fr));
+    gap: var(--pm-grid-gap);
     align-content: start;
-    padding: 2px;
+    padding: 4px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--pm-border) transparent;
+    scrollbar-gutter: stable;
 }
 
-/* Card size (grid density) — configurable from settings. */
-.pm_grid[data-size="small"] {
-    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
-    gap: 10px;
+/* Configured columns are a ceiling; narrow workspaces keep readable cards. */
+.pm_grid:where([data-columns]:not([data-columns="auto"])) {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, max(144px, calc((100% - (var(--pm-grid-columns, 6) - 1) * var(--pm-grid-gap)) / var(--pm-grid-columns, 6)))), 1fr));
 }
 
-.pm_grid[data-size="large"] {
-    grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
-    gap: 14px;
+.pm_grid[data-columns="3"] { --pm-grid-columns: 3; }
+.pm_grid[data-columns="4"] { --pm-grid-columns: 4; }
+.pm_grid[data-columns="5"] { --pm-grid-columns: 5; }
+.pm_grid[data-columns="6"] { --pm-grid-columns: 6; }
+.pm_grid[data-columns="7"] { --pm-grid-columns: 7; }
+.pm_grid[data-columns="8"] { --pm-grid-columns: 8; }
+.pm_grid[data-columns="9"] { --pm-grid-columns: 9; }
+.pm_grid[data-columns="10"] { --pm-grid-columns: 10; }
+
+.pm_grid:is([data-columns="7"], [data-columns="8"], [data-columns="9"], [data-columns="10"]) {
+    --pm-grid-gap: 8px;
 }
 
 .pm_status {
@@ -414,14 +456,11 @@
 .pm_spotlight {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     flex-shrink: 0;
-    padding: 6px 10px;
-    border: 1px solid var(--pm-border);
-    border-radius: 12px;
-    background:
-        linear-gradient(180deg, color-mix(in srgb, var(--pm-accent) 8%, transparent) 0%, transparent 70%),
-        var(--pm-surface-strong);
+    min-width: 0;
+    padding-top: 8px;
+    border-top: 1px solid var(--pm-border);
 }
 
 .pm_spotlight_empty {
@@ -429,13 +468,40 @@
     font-size: 0.84rem;
 }
 
+.pm_spotlight_pick {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 40px;
+    margin: 0;
+    padding: 4px 6px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--pm-text);
+    text-align: left;
+    cursor: pointer;
+}
+
+.pm_spotlight_pick:hover {
+    background: var(--pm-accent-soft);
+}
+
+.pm_spotlight_edit {
+    flex-shrink: 0;
+    color: var(--pm-muted);
+    font-size: 0.68rem;
+}
+
 .pm_spotlight_avatar {
-    width: 38px;
-    height: 38px;
+    width: 28px;
+    height: 28px;
     flex-shrink: 0;
     border-radius: 50%;
     overflow: hidden;
-    border: 2px solid color-mix(in srgb, var(--pm-accent) 50%, var(--pm-border));
+    border: 1px solid color-mix(in srgb, var(--pm-accent) 50%, var(--pm-border));
 }
 
 .pm_spotlight_avatar img {
@@ -446,25 +512,26 @@
 
 .pm_spotlight_info {
     display: flex;
-    flex-direction: column;
-    gap: 1px;
+    align-items: baseline;
+    gap: 8px;
     flex: 1 1 auto;
     min-width: 0;
 }
 
-.pm_spotlight_heading {
-    display: none;
-}
-
 .pm_spotlight_name {
+    min-width: 0;
     font-weight: 600;
-    font-size: 0.88rem;
+    font-size: 0.82rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
 .pm_spotlight_title {
+    min-width: 0;
+    flex: 0 1 auto;
+    padding-left: 8px;
+    border-left: 1px solid var(--pm-border);
     font-size: 0.74rem;
     color: var(--pm-muted);
     white-space: nowrap;
@@ -474,16 +541,18 @@
 
 .pm_spotlight_locks {
     display: flex;
-    gap: 6px;
+    gap: 4px;
     flex-shrink: 0;
 }
 
 .pm_lock_btn {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 6px 10px;
-    border-radius: 999px;
+    justify-content: center;
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
     border: 1px solid var(--pm-border);
     background: var(--pm-surface);
     color: var(--pm-muted);
@@ -512,13 +581,15 @@
 
 .pm_toolbar > .menu_button {
     flex: 0 0 auto;
-    height: 32px;
+    height: 36px;
+    width: 36px;
+    padding: 0;
     margin: 0;
 }
 
 .pm_toolbar > select {
     flex: 0 0 auto;
-    height: 32px;
+    height: 36px;
     margin: 0;
     width: auto;
 }
@@ -527,8 +598,8 @@
     display: none;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
     flex-shrink: 0;
     border-radius: 8px;
     border: 1px solid var(--pm-border);
@@ -556,7 +627,7 @@
 .pm_search_wrap input {
     box-sizing: border-box;
     width: 100%;
-    height: 32px;
+    height: 36px;
     margin: 0;
     padding-left: 32px !important;
 }
@@ -568,7 +639,7 @@
     overflow-x: auto;
     overscroll-behavior-x: contain;
     scrollbar-width: none;
-    padding: 1px 0 3px;
+    padding: 3px;
 }
 
 .pm_filters::-webkit-scrollbar {
@@ -581,8 +652,8 @@
     justify-content: center;
     gap: 5px;
     flex: 0 0 auto;
-    min-height: 28px;
-    padding: 4px 10px;
+    min-height: 30px;
+    padding: 5px 11px;
     border: 1px solid var(--pm-border);
     border-radius: 999px;
     background: var(--pm-surface-strong);
@@ -604,25 +675,39 @@
 
 /* ── Cards (avatar tiles) ── */
 .pm_card {
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
+    min-width: 0;
     padding: 8px;
     border: 1px solid var(--pm-border);
     border-radius: 14px;
     background: var(--pm-surface-strong);
     cursor: pointer;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
 .pm_card:hover {
     border-color: color-mix(in srgb, var(--pm-accent) 45%, var(--pm-border) 55%);
-    transform: translateY(-2px);
+    background-color: var(--pm-surface-soft);
 }
 
-.pm_card:active {
-    transform: scale(0.97);
+.pm_card_pick {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
 }
 
 .pm_card.is-active {
@@ -630,28 +715,10 @@
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--pm-accent) 25%, transparent);
 }
 
-/* Active-persona pill, so the current persona is spottable in the list too. */
+/* Keep state markers clear of the caption. */
 .pm_card_active {
-    position: absolute;
-    left: 4px;
-    bottom: 4px;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    max-width: calc(100% - 8px);
-    padding: 2px 7px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--pm-accent) 22%, rgba(0, 0, 0, 0.55) 78%);
-    color: color-mix(in srgb, var(--pm-accent) 85%, #fff 15%);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pm-accent) 45%, transparent);
-    font-size: 0.62rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    pointer-events: none;
-}
-
-.pm_card_active i {
+    margin-right: 4px;
+    color: #fff;
     font-size: 0.66rem;
 }
 
@@ -663,71 +730,138 @@
     background: var(--pm-surface);
 }
 
-.pm_card.is-default .pm_card_cover {
-    outline: 2px solid var(--golden, #f5c451);
-    outline-offset: -2px;
+.pm_card.is-default .pm_card_cover::after {
+    content: "";
+    position: absolute;
+    inset: 1px;
+    border: 8px solid transparent;
+    border-image: url("default-frame.svg") 8 / 8px round;
+    pointer-events: none;
 }
 
 .pm_card_cover img {
     display: block;
     width: 100%;
-    aspect-ratio: 1 / 1;
+    aspect-ratio: var(--pm-card-ratio, 4 / 5);
     height: auto;
     object-fit: cover;
     object-position: center top;
 }
 
-.pm_card_badges {
+.pm_card_meta {
     position: absolute;
-    top: 4px;
-    right: 4px;
+    top: 8px;
+    left: 12px;
+    right: 8px;
     display: flex;
-    gap: 3px;
+    align-items: center;
+    gap: 4px;
+    min-height: 32px;
+    pointer-events: none;
+}
+
+.pm_card_badges {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 4px;
+}
+
+.pm_card.is-default .pm_card_meta {
+    top: 16px;
+    right: 14px;
+    padding-left: 10px;
+}
+
+.pm_card.is-default .pm_card_badges {
+    min-width: 0;
+    flex-shrink: 1;
+    flex-wrap: wrap;
+}
+
+.pm_card_meta i {
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.pm_card_meta :is(.pm_chip, .pm_card_fav) > i {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1rem;
+    height: 1rem;
+    line-height: 1;
+}
+
+.pm_card_meta .pm_chip > i {
+    font-size: 0.625rem;
+}
+
+.pm_card_meta :is(.pm_chip_chat, .pm_chip_char) > i {
+    font-size: 0.55rem;
+}
+
+.pm_card_meta .pm_card_fav > i {
+    width: 1.25em;
+    height: 1.25em;
+    font-size: inherit;
 }
 
 .pm_chip {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: rgba(0, 0, 0, 0.6);
-    box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
-    font-size: 0.65rem;
+    width: 1rem;
+    height: 1rem;
 }
 
-.pm_chip_chat { color: #7ec4ff; }
-.pm_chip_char { color: #ffd27e; }
-.pm_chip_default { color: var(--golden, #f5c451); }
+.pm_chip_chat { color: #bad3dc; }
+.pm_chip_char { color: #d4c6ab; }
+.pm_chip_default { color: #d4b88a; }
 
 .pm_card_body {
+    position: absolute;
+    inset: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 1px;
+    gap: 3px;
     width: 100%;
     min-width: 0;
+    padding: 8px 6px;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.12) 20%, transparent 45%);
+    color: #fff;
+    pointer-events: none;
 }
 
 .pm_card_name {
-    font-weight: 600;
-    font-size: 0.82rem;
+    margin-top: auto;
+    font-weight: 700;
+    font-size: 1rem;
     max-width: 100%;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     text-align: center;
+    text-shadow: 0 1px 3px #000, 0 0 2px #000;
 }
 
 .pm_card_title {
+    flex: 0 0 auto;
+    opacity: 0;
+    min-width: 0;
     font-size: 0.68rem;
-    color: var(--pm-accent);
+    color: #e0e0e0;
     max-width: 100%;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     text-align: center;
+    text-shadow: 0 1px 3px #000, 0 0 2px #000;
+}
+
+.pm_card:hover .pm_card_title,
+.pm_card:focus-within .pm_card_title {
+    opacity: 1;
 }
 
 /* ── Pager ── */
@@ -737,7 +871,9 @@
     justify-content: center;
     gap: 10px;
     flex-shrink: 0;
-    padding-top: 4px;
+    flex-wrap: wrap;
+    padding-top: 8px;
+    border-top: 1px solid var(--pm-border);
 }
 
 .pm_pager_label {
@@ -766,7 +902,7 @@
 }
 
 .pm_folder_divider {
-    margin: 8px 4px 4px;
+    margin: 6px 4px 2px;
     font-size: 0.66rem;
     font-weight: 700;
     text-transform: uppercase;
@@ -777,12 +913,29 @@
 .pm_folder_row {
     display: flex;
     align-items: center;
-    gap: 9px;
-    padding: 8px 9px;
+    gap: 2px;
+    padding: 0 2px;
     border-radius: 9px;
     cursor: pointer;
     color: var(--pm-text);
     transition: background 0.15s ease, outline-color 0.15s ease;
+}
+
+.pm_folder_pick {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 36px;
+    padding: 6px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+    font-size: 0.82rem;
 }
 
 .pm_folder_row:hover {
@@ -824,31 +977,37 @@
 
 /* ── Favorite star on cards ── */
 .pm_card_fav {
-    position: absolute;
-    top: 4px;
-    left: 4px;
-    width: 24px;
-    height: 24px;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    margin: 0 0 0 auto;
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    padding: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     border: none;
-    border-radius: 50%;
-    background: rgba(0, 0, 0, 0.5);
+    border-radius: 6px;
+    background: transparent;
     color: var(--white70a, #ddd);
     cursor: pointer;
     opacity: 0;
-    font-size: 0.72rem;
+    font-size: 1rem;
+    line-height: 1;
+    pointer-events: auto;
     transition: opacity 0.15s ease, color 0.15s ease;
 }
 
 .pm_card:hover .pm_card_fav,
+.pm_card:focus-within .pm_card_fav,
 .pm_card_fav.is-on {
     opacity: 1;
 }
 
 .pm_card_fav.is-on {
-    color: var(--golden, #f5c451);
+    color: #d4b88a;
 }
 
 .pm_card.is-dragging {
@@ -857,26 +1016,21 @@
 
 /* ── Card action row (edit / move / remove / delete) ── */
 .pm_card_actions {
-    display: flex;
-    justify-content: center;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
     gap: 2px;
     width: 100%;
-    margin-top: 2px;
-    opacity: 0;
-    max-height: 0;
-    overflow: hidden;
-    transition: opacity 0.15s ease, max-height 0.15s ease;
-}
-
-.pm_card:hover .pm_card_actions,
-.pm_card:focus-within .pm_card_actions {
-    opacity: 1;
-    max-height: 40px;
+    margin-top: auto;
+    padding-top: 3px;
+    border-top: 1px solid var(--pm-border);
 }
 
 .pm_card_action {
-    width: 28px;
+    width: 100%;
+    min-width: 0;
     height: 28px;
+    padding: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -913,11 +1067,10 @@
     display: none;
     align-items: center;
     justify-content: center;
-    border: none;
     border-radius: 6px;
     background: rgba(0, 0, 0, 0.55);
     color: #fff;
-    cursor: pointer;
+    pointer-events: none;
     font-size: 0.78rem;
     z-index: 2;
 }
@@ -928,6 +1081,10 @@
 
 .pm_selecting .pm_card_fav {
     display: none;
+}
+
+.pm_selecting .pm_card_meta {
+    left: 40px;
 }
 
 .pm_card.is-selected {
@@ -943,10 +1100,10 @@
 .pm_select_bar {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     flex-shrink: 0;
     flex-wrap: wrap;
-    padding: 8px 10px;
+    padding: 4px 8px;
     border: 1px solid var(--pm-accent);
     border-radius: 12px;
     background: var(--pm-accent-soft);
@@ -973,13 +1130,15 @@
     transition: opacity 0.15s ease;
 }
 
-.pm_folder_row:hover .pm_folder_tools {
+.pm_folder_row:hover .pm_folder_tools,
+.pm_folder_row:focus-within .pm_folder_tools {
     opacity: 1;
 }
 
 .pm_folder_tool {
-    width: 28px;
+    width: 26px;
     height: 28px;
+    padding: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1006,6 +1165,7 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
+    min-width: 0;
     overflow: hidden;
     border: 1px solid var(--pm-border);
     border-radius: 18px;
@@ -1025,7 +1185,7 @@
     align-items: center;
     gap: 8px;
     flex-shrink: 0;
-    padding: 10px 12px;
+    padding: 6px 10px;
     border-bottom: 1px solid var(--pm-border);
     background:
         linear-gradient(180deg, color-mix(in srgb, var(--pm-accent) 10%, transparent) 0%, transparent 90%),
@@ -1149,7 +1309,6 @@
     border-radius: 0;
 }
 
-.pm-editor-max .pm_header,
 .pm-editor-max .pm_spotlight,
 .pm-editor-max .pm_toolbar,
 .pm-editor-max .pm_filters,
@@ -1263,12 +1422,12 @@
 .pm_editor_body {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: 12px;
+    padding: 10px;
 }
 
 .pm_editor_ops {
@@ -1277,12 +1436,23 @@
     gap: 6px;
 }
 
+.pm_save_status {
+    margin-left: auto;
+    min-width: 0;
+    align-self: center;
+    color: var(--pm-muted);
+    font-size: 0.68rem;
+    text-align: right;
+}
+
 .pm_op_btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     width: 34px;
     height: 34px;
+    flex-shrink: 0;
+    padding: 0;
     border: 1px solid var(--pm-border);
     border-radius: 9px;
     background: var(--pm-surface);
@@ -1310,6 +1480,7 @@
     display: flex;
     flex-direction: column;
     gap: 5px;
+    min-width: 0;
 }
 
 .pm_field_label {
@@ -1324,6 +1495,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
 }
 
 .pm_field_head .pm_field_label {
@@ -1335,7 +1507,12 @@
     color: var(--pm-muted);
     cursor: pointer;
     font-size: 0.82rem;
-    padding: 2px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
     transition: color 0.15s ease;
 }
 
@@ -1366,49 +1543,25 @@
     min-height: 64px;
 }
 
-.pm_duplicate_warning {
-    padding: 7px 9px;
-    border: 1px solid color-mix(in srgb, var(--golden, #f5c451) 55%, var(--pm-border));
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--golden, #f5c451) 10%, var(--pm-surface));
-    color: color-mix(in srgb, var(--golden, #f5c451) 80%, var(--pm-text));
-    font-size: 0.72rem;
-    line-height: 1.4;
-}
-
-/* Token budget bar */
-.pm_token_bar {
-    flex: 1 1 auto;
-    height: 5px;
-    border-radius: 999px;
-    background: var(--pm-surface-soft);
-    overflow: hidden;
-}
-
-.pm_token_fill {
-    display: block;
-    height: 100%;
-    width: 0;
-    border-radius: 999px;
-    background: var(--pm-accent);
-    transition: width 0.2s ease, background 0.2s ease;
-}
-
-.pm_token_fill.is-warn {
-    background: var(--pm-danger);
-}
-
 .pm_token_count {
     flex: 0 0 auto;
-    font-size: 0.7rem;
+    margin-left: auto;
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
     color: var(--pm-muted);
+}
+
+.pm_token_count > #pm_token_num {
+    color: var(--pm-text);
+    font-weight: 600;
 }
 
 /* Connections */
 .pm_conn_locks {
     display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
+    gap: 4px;
+    margin-left: auto;
 }
 
 .pm_conn_locks.is-disabled {
@@ -1418,19 +1571,17 @@
 .pm_conn_btn {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 6px 10px;
-    border-radius: 999px;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 8px;
     border: 1px solid var(--pm-border);
     background: var(--pm-surface);
     color: var(--pm-muted);
     cursor: pointer;
     font-size: 0.74rem;
     transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
-}
-
-.pm_conn_btn:disabled {
-    cursor: not-allowed;
 }
 
 .pm_conn_btn:not(:disabled):hover {
@@ -1556,7 +1707,7 @@
     opacity: 1;
 }
 
-/* In-modal palette popover (header button) */
+/* In-modal palette popover */
 .pm_theme_menu {
     position: absolute;
     top: 52px;
@@ -1573,12 +1724,13 @@
     box-shadow: var(--pm-shadow);
 }
 
-.pm_theme_btn.is-on {
-    color: var(--pm-accent);
-}
-
 /* ── Mobile: full-screen takeover + sidebar as animated top overlay ── */
 @media (max-width: 900px) {
+    .pm_grid[data-columns] {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+
     .pm_backdrop {
         backdrop-filter: none;
         -webkit-backdrop-filter: none;
@@ -1591,6 +1743,9 @@
         border-radius: 0;
         border: none;
         padding: 12px;
+        padding-left: max(12px, env(safe-area-inset-left));
+        padding-right: max(12px, env(safe-area-inset-right));
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
     }
 
     .pm_modal.pm-editor-max .pm_panel {
@@ -1611,7 +1766,7 @@
         right: 0;
         z-index: 5;
         width: auto;
-        max-height: min(60vh, 420px);
+        max-height: min(100%, 60dvh, 420px);
         opacity: 1;
         box-shadow: var(--pm-shadow);
         transition: max-height 0.25s ease, opacity 0.2s ease;
@@ -1621,33 +1776,19 @@
         max-height: 0 !important;
         opacity: 0;
         pointer-events: none;
+        visibility: hidden;
         padding-top: 0;
         padding-bottom: 0;
         border: none;
     }
 
-    .pm_content.has-folders ~ * .pm_sidebar_toggle,
     .pm_panel:has(.pm_content.has-folders) .pm_sidebar_toggle {
         display: inline-flex;
     }
 
-    .pm_spotlight_locks .pm_lock_btn span {
-        display: none;
-    }
-
-    .pm_grid {
-        grid-template-columns: repeat(auto-fill, minmax(max(120px, calc((100% - 40px) / 5)), 1fr));
-        gap: 10px;
-    }
-
-    .pm_grid[data-size="small"] {
-        grid-template-columns: repeat(auto-fill, minmax(max(96px, calc((100% - 32px) / 5)), 1fr));
-        gap: 8px;
-    }
-
-    .pm_grid[data-size="large"] {
-        grid-template-columns: repeat(auto-fill, minmax(max(160px, calc((100% - 24px) / 3)), 1fr));
-        gap: 12px;
+    .pm_spotlight_locks .pm_lock_btn {
+        width: 40px;
+        height: 40px;
     }
 
     .pm_editor_back {
@@ -1658,49 +1799,24 @@
         display: none;
     }
 
-}
-
-@media (max-width: 600px) {
-    .pm_panel {
-        gap: 10px;
-        padding: 10px;
+    .pm_toolbar_actions {
+        margin-left: auto;
     }
 
-    .pm_header {
-        align-items: center;
-        gap: 8px;
-    }
-
-    .pm_header_copy {
-        flex: 1 1 auto;
-        min-width: 0;
-    }
-
-    .pm_header_copy h2 {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .pm_header_copy p {
-        display: none;
-    }
-
-    .pm_header_actions {
-        justify-content: flex-end;
-        flex: 0 0 auto;
-        gap: 6px;
-        width: auto;
-    }
-
-    .pm_header_actions .menu_button {
+    .pm_toolbar > .menu_button,
+    .pm_toolbar_actions .menu_button,
+    .pm_sidebar_toggle {
         width: 40px;
         min-width: 40px;
+        height: 40px;
         padding-inline: 0;
     }
 
+    /* Keep the popover's containing block at .pm_panel. */
+    .pm_toolbar,
+    .pm_toolbar_actions,
     .pm_more_wrap {
-        position: relative;
+        position: static;
     }
 
     .pm_more_btn {
@@ -1709,13 +1825,17 @@
 
     .pm_more_menu {
         position: absolute;
-        top: calc(100% + 6px);
-        right: 0;
+        top: 50%;
+        left: 50%;
+        translate: -50% -50%;
         z-index: 14;
         display: none;
         align-items: stretch;
         flex-direction: column;
-        width: min(220px, calc(100vw - 28px));
+        width: min(220px, calc(100% - 2 * max(14px, env(safe-area-inset-left), env(safe-area-inset-right))));
+        max-height: min(60dvh, 420px, calc(100% - 2 * max(14px, env(safe-area-inset-top), env(safe-area-inset-bottom))));
+        overflow-y: auto;
+        overscroll-behavior: contain;
         padding: 7px;
         border: 1px solid var(--pm-border);
         border-radius: 12px;
@@ -1728,9 +1848,11 @@
     }
 
     .pm_more_menu .menu_button {
+        flex-shrink: 0;
         justify-content: flex-start;
         width: 100%;
         min-width: 0;
+        min-height: 40px;
         padding-inline: 10px;
     }
 
@@ -1742,32 +1864,100 @@
     }
 
     .pm_toolbar {
-        align-items: stretch;
         flex-wrap: wrap;
     }
 
-    .pm_search_wrap {
-        flex: 1 1 180px;
-    }
-
+    .pm_search_wrap,
     .pm_toolbar > select {
-        flex: 1 1 150px;
+        flex: 1 1 calc(50% - 3px);
         min-width: 0;
     }
 
-    .pm_grid,
-    .pm_grid[data-size="small"],
-    .pm_grid[data-size="large"] {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+    .pm_search_wrap input,
+    .pm_toolbar > select {
+        height: 40px;
+        font-size: 16px;
+    }
+
+    .pm_theme_menu {
+        top: 50%;
+        right: auto;
+        left: 50%;
+        translate: -50% -50%;
+        max-height: min(70dvh, 460px);
+    }
+}
+
+@media (max-width: 600px) {
+    .pm_panel {
+        gap: 10px;
+        padding: 10px;
+        padding-left: max(10px, env(safe-area-inset-left));
+        padding-right: max(10px, env(safe-area-inset-right));
+        padding-bottom: max(10px, env(safe-area-inset-bottom));
+    }
+
+    .pm_spotlight_title {
+        display: none;
+    }
+
+    .pm_select_bar {
+        gap: 6px;
+        padding: 8px;
+        max-height: 25dvh;
+        overflow-y: auto;
+    }
+
+    .pm_select_count {
+        flex-basis: 100%;
+    }
+
+    .pm_select_bar .menu_button {
+        flex: 1 1 auto;
+        font-size: 0.74rem;
+    }
+
+    .pm_panel :is(input, select, textarea).text_pole {
+        font-size: 16px;
+    }
+}
+
+@media (hover: none), (pointer: coarse) {
+    .pm_card_title {
+        opacity: 1;
+        font-size: 0.72rem;
+    }
+}
+
+@media (max-width: 900px), (any-pointer: coarse) {
+    .pm_card_fav {
+        width: 44px;
+        height: 44px;
+        font-size: 1.125rem;
+        opacity: 1;
     }
 }
 
 @media (pointer: coarse) {
-    .pm_header_actions .menu_button {
+    .pm_panel .menu_button,
+    .pm_filter_chip,
+    .pm_op_btn,
+    .pm_conn_btn {
         min-height: 40px;
     }
 
     .pm_lock_btn {
+        min-width: 40px;
+        min-height: 40px;
+    }
+
+    .pm_conn_btn,
+    .pm_op_btn,
+    .pm_editor_back,
+    .pm_editor_close,
+    .pm_editor_expand,
+    .pm_desc_maximize {
+        min-width: 40px;
         min-height: 40px;
     }
 
@@ -1775,20 +1965,18 @@
         min-height: 46px;
     }
 
-    /* No hover on touch — keep favorite star, card actions and folder tools reachable. */
-    .pm_card_fav {
-        opacity: 1;
-        background: rgba(0, 0, 0, 0.45);
-    }
-
-    .pm_card_actions {
-        opacity: 1;
-        max-height: 40px;
-    }
-
     .pm_card_action {
-        width: 34px;
-        height: 34px;
+        height: 40px;
+    }
+
+    .pm_card_actions:has([data-pm-card="remove"]) {
+        grid-auto-flow: row;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .pm_folder_tool {
+        width: 40px;
+        height: 40px;
     }
 
     .pm_folder_tools {
@@ -1797,8 +1985,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .pm_sidebar,
-    .pm_editor {
-        transition: none;
+    .pm_modal *,
+    .persona-manager-settings * {
+        transition: none !important;
+        animation: none !important;
     }
 }

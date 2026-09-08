@@ -43,13 +43,33 @@
 
                     <div class="pm_set_row">
                         <span class="pm_set_text">
-                            <span class="pm_set_label" data-i18n="settings.gridSize">Card size</span>
-                            <span class="pm_set_desc" data-i18n="settings.gridSizeDesc">Grid density inside the manager.</span>
+                            <span class="pm_set_label" data-i18n="settings.gridColumns">Cards per row</span>
+                            <span class="pm_set_desc" data-i18n="settings.gridColumnsDesc">Maximum count on larger screens; fewer columns in narrow spaces. Mobile uses two columns.</span>
                         </span>
-                        <select id="pm_grid_size" class="text_pole textarea_compact pm_set_control">
-                            <option value="small" data-i18n="settings.grid.small">Small</option>
-                            <option value="medium" data-i18n="settings.grid.medium">Medium</option>
-                            <option value="large" data-i18n="settings.grid.large">Large</option>
+                        <select id="pm_grid_columns" class="text_pole textarea_compact pm_set_control" aria-label="Cards per row" data-i18n-aria-label="settings.gridColumns">
+                            <option value="auto" data-i18n="settings.grid.auto">Auto</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                            <option value="5">5</option>
+                            <option value="6">6</option>
+                            <option value="7">7</option>
+                            <option value="8">8</option>
+                            <option value="9">9</option>
+                            <option value="10">10</option>
+                        </select>
+                    </div>
+
+                    <div class="pm_set_row">
+                        <span class="pm_set_text">
+                            <span class="pm_set_label" data-i18n="settings.aspectRatio">Image ratio</span>
+                            <span class="pm_set_desc" data-i18n="settings.aspectRatioDesc">Avatar proportions on desktop and mobile.</span>
+                        </span>
+                        <select id="pm_aspect_ratio" class="text_pole textarea_compact pm_set_control" aria-label="Image ratio" data-i18n-aria-label="settings.aspectRatio">
+                            <option value="1 / 1">1:1</option>
+                            <option value="3 / 4">3:4</option>
+                            <option value="4 / 5">4:5</option>
+                            <option value="5 / 4">5:4</option>
+                            <option value="4 / 3">4:3</option>
                         </select>
                     </div>
 
@@ -58,7 +78,7 @@
                             <span class="pm_set_label" data-i18n="settings.pageSize">Personas per page</span>
                             <span class="pm_set_desc" data-i18n="settings.pageSizeDesc">Fewer per page keeps large libraries fast.</span>
                         </span>
-                        <select id="pm_page_size" class="text_pole textarea_compact pm_set_control">
+                        <select id="pm_page_size" class="text_pole textarea_compact pm_set_control" aria-label="Personas per page" data-i18n-aria-label="settings.pageSize">
                             <option value="10">10</option>
                             <option value="30">30</option>
                             <option value="60">60</option>
