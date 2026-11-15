@@ -25,6 +25,7 @@ const MODULE_SETTINGS_KEY = 'aevPersonaManager';
 
 const DEFAULT_SETTINGS = {
     hijackDrawer: true,
+    cropOnUpload: true,
     sort: 'az',
     gridColumns: '6',
     aspectRatio: '4 / 5',
@@ -51,7 +52,6 @@ function getContext() {
 // ── Module state ──────────────────────────────────────────────────────────
 const FOLDER_ALL = '__all__';
 const FOLDER_UNFILED = '__unfiled__';
-const FOLDER_FAVORITES = '__favorites__';
 
 // Persona description positions + defaults, mirroring personas.js.
 const POS = { IN_PROMPT: 0, AT_DEPTH: 4 };
@@ -62,10 +62,23 @@ const PAGE_SIZES = Object.freeze([10, 30, 60, 100]);
 const GRID_COLUMNS = Object.freeze(['auto', '3', '4', '5', '6', '7', '8', '9', '10']);
 const ASPECT_RATIOS = Object.freeze(['1 / 1', '3 / 4', '4 / 5', '5 / 4', '4 / 3']);
 const SORT_MODES = Object.freeze(['az', 'za', 'newest', 'oldest', 'recent']);
-const FILTER_MODES = Object.freeze(['all', 'active', 'default', 'locked', 'favorites', 'unsorted']);
+const FILTER_MODES = Object.freeze(['all', 'active', 'default', 'locked', 'favorites']);
+const CROP_PREVIEW_DIM = 1280;
+const AVATAR_EXPORT_DIM = 1024;
+const CROP_PRESETS = Object.freeze([
+    { id: 'free', ratio: NaN, labelKey: 'crop.free' },
+    { id: '1 / 1', ratio: 1, label: '1:1' },
+    { id: '2 / 3', ratio: 2 / 3, label: '2:3' },
+    { id: '3 / 4', ratio: 3 / 4, label: '3:4' },
+    { id: '4 / 5', ratio: 4 / 5, label: '4:5' },
+    { id: '5 / 4', ratio: 5 / 4, label: '5:4' },
+    { id: '4 / 3', ratio: 4 / 3, label: '4:3' },
+]);
 const MOBILE_LAYOUT_QUERY = '(max-width: 900px)';
 const MOBILE_LAYOUT_MEDIA = window.matchMedia(MOBILE_LAYOUT_QUERY);
 const EDITOR_UPDATE = Symbol('persona-manager-edit');
+const TAG = 'PM';
+const warn = (step, err) => console.warn(`[${TAG}] ${step}`, err);
 
 function isMobileLayout() {
     return MOBILE_LAYOUT_MEDIA.matches;
@@ -107,6 +120,7 @@ const state = {
     pageSize: 30,
     currentPage: 1,
     activeFolderId: FOLDER_ALL,
+    sidebarPreference: null, // desktop session override for folder sidebar visibility
     dragId: null,           // avatar id being dragged
     selectMode: false,
     selected: new Set(),    // avatar ids selected for bulk actions
@@ -201,7 +215,6 @@ const I18N = {
         'filter.default': 'Default',
         'filter.locked': 'Locked',
         'filter.favorites': 'Favorites',
-        'filter.unsorted': 'Unsorted',
         'pager.prev': 'Previous page',
         'pager.next': 'Next page',
         'pager.range': '{from}–{to} of {total}',
@@ -217,18 +230,12 @@ const I18N = {
         'card.use': 'Use persona: {name}',
         'card.select': 'Select persona: {name}',
         'card.edit': 'Edit',
-        'card.move': 'Move to folder',
-        'card.removeFromFolder': 'Remove from this folder',
         'card.delete': 'Delete persona',
         'card.favoriteFor': 'Toggle favorite: {name}',
         'card.editFor': 'Edit persona: {name}',
-        'card.moveFor': 'Move to folder: {name}',
-        'card.removeFor': 'Remove {name} from this folder',
-        'card.deleteFor': 'Delete persona: {name}',
         'card.deleteConfirm': 'Delete persona "{name}"? This cannot be undone.',
         'card.deleteError': 'Failed to delete the persona.',
         'folder.all': 'All personas',
-        'folder.favorites': 'Favorites',
         'folder.unfiled': 'Unsorted',
         'folder.heading': 'Folders',
         'folder.toggle': 'Toggle folders',
@@ -249,8 +256,6 @@ const I18N = {
         'select.deleteConfirm': 'Delete {n} persona(s)? This cannot be undone.',
         'backup.export': 'Backup personas (.zip)',
         'backup.import': 'Restore personas (.zip)',
-        'backup.exportShort': 'Backup',
-        'backup.importShort': 'Restore',
         'backup.empty': 'No personas to back up.',
         'backup.noZip': 'ZIP library unavailable.',
         'backup.invalid': 'Invalid or unreadable backup file.',
@@ -262,19 +267,31 @@ const I18N = {
         'backup.progressZip': 'Compressing…',
         'backup.progressImport': 'Restoring personas…',
         'convert.btn': 'Character → persona',
-        'convert.short': 'Convert',
         'convert.prompt': 'Convert which character to a persona?',
         'convert.empty': 'No characters to convert.',
         'convert.error': 'Failed to convert character to persona.',
         'create.btn': 'Create persona',
+        'create.short': 'New',
         'create.namePrompt': 'Enter a name for this persona:',
         'create.nameLabel': 'Persona Title (optional, display only)',
+        'create.avatarLabel': 'Avatar (optional)',
+        'create.avatarDefault': 'Default image',
+        'create.avatarPick': 'Choose image',
+        'create.avatarReset': 'Reset image',
         'create.error': 'Failed to create persona.',
+        'crop.title': 'Crop avatar',
+        'crop.hint': 'Drag the frame to crop your avatar, or pick a ratio below.',
+        'crop.aspectLabel': 'Crop aspect ratio',
+        'crop.free': 'Free',
+        'crop.cardRatio': 'Current card ratio',
+        'crop.apply': 'Apply',
         'settings.intro': 'A prettier, mobile-first way to browse, organize and edit your personas.',
         'settings.open': 'Open Persona Manager',
         'settings.behaviorHeading': 'Behavior',
         'settings.hijack': 'Open manager instead of the default Persona panel',
         'settings.hijackDesc': 'Clicking the Persona Management drawer button opens this manager.',
+        'settings.cropOnUpload': 'Crop avatars on upload',
+        'settings.cropOnUploadDesc': 'Open the crop editor before saving a newly picked persona image.',
         'settings.displayHeading': 'Display',
         'settings.gridColumns': 'Cards per row',
         'settings.gridColumnsDesc': 'Maximum count on larger screens; fewer columns in narrow spaces. Mobile uses two columns.',
@@ -301,10 +318,12 @@ const I18N = {
         'editor.expand': 'Full screen',
         'editor.collapse': 'Exit full screen',
         'editor.expandDesc': 'Expand the description editor',
+        'editor.use': 'Use',
+        'editor.active': 'Active',
         'editor.rename': 'Rename persona',
         'editor.image': 'Change image',
         'editor.duplicate': 'Duplicate persona',
-        'editor.makeDefault': 'Set as default',
+        'editor.duplicateShort': 'Duplicate',
         'editor.delete': 'Delete persona',
         'editor.title': 'Title',
         'editor.description': 'Description',
@@ -321,11 +340,12 @@ const I18N = {
         'editor.role.user': 'User',
         'editor.role.assistant': 'Assistant',
         'editor.connections': 'Connections',
-        'editor.locksHint': 'Select this persona first to change its locks.',
+        'editor.locksHint': 'Use this persona first to change chat or character locks.',
         'editor.noConnections': 'No character connections yet.',
         'editor.lorebook': 'Lorebook',
         'editor.lorebook.none': 'None',
         'editor.openLorebook': 'Open lorebook',
+        'editor.folder': 'Folder',
         'editor.notes': 'Private notes',
         'editor.notesPlaceholder': 'Notes visible only here, never sent to the model.',
         'editor.renamePrompt': 'Enter a new name for this persona:',
@@ -352,7 +372,6 @@ const I18N = {
         'filter.default': 'По умолчанию',
         'filter.locked': 'Привязанные',
         'filter.favorites': 'Избранное',
-        'filter.unsorted': 'Несортированное',
         'pager.prev': 'Предыдущая страница',
         'pager.next': 'Следующая страница',
         'pager.range': '{from}–{to} из {total}',
@@ -368,18 +387,12 @@ const I18N = {
         'card.use': 'Использовать персону: {name}',
         'card.select': 'Выбрать персону: {name}',
         'card.edit': 'Редактировать',
-        'card.move': 'Переместить в папку',
-        'card.removeFromFolder': 'Убрать из этой папки',
         'card.delete': 'Удалить персону',
         'card.favoriteFor': 'В избранное: {name}',
         'card.editFor': 'Редактировать персону: {name}',
-        'card.moveFor': 'Переместить в папку: {name}',
-        'card.removeFor': 'Убрать {name} из этой папки',
-        'card.deleteFor': 'Удалить персону: {name}',
         'card.deleteConfirm': 'Удалить персону «{name}»? Это действие необратимо.',
         'card.deleteError': 'Не удалось удалить персону.',
         'folder.all': 'Все персоны',
-        'folder.favorites': 'Избранное',
         'folder.unfiled': 'Несортированное',
         'folder.heading': 'Папки',
         'folder.toggle': 'Показать или скрыть папки',
@@ -400,8 +413,6 @@ const I18N = {
         'select.deleteConfirm': 'Удалить персон ({n})? Это действие необратимо.',
         'backup.export': 'Резервная копия персон (.zip)',
         'backup.import': 'Восстановить персон (.zip)',
-        'backup.exportShort': 'Копия',
-        'backup.importShort': 'Восстановить',
         'backup.empty': 'Нет персон для резервной копии.',
         'backup.noZip': 'Библиотека ZIP недоступна.',
         'backup.invalid': 'Недопустимый или нечитаемый файл резервной копии.',
@@ -413,19 +424,31 @@ const I18N = {
         'backup.progressZip': 'Сжатие…',
         'backup.progressImport': 'Восстановление персон…',
         'convert.btn': 'Персонаж → персона',
-        'convert.short': 'Преобразовать',
         'convert.prompt': 'Какого персонажа преобразовать в персону?',
         'convert.empty': 'Нет персонажей для преобразования.',
         'convert.error': 'Не удалось преобразовать персонажа в персону.',
         'create.btn': 'Создать персону',
+        'create.short': 'Создать',
         'create.namePrompt': 'Введите имя для этой персоны:',
         'create.nameLabel': 'Заголовок персоны (необязательно, только для отображения)',
+        'create.avatarLabel': 'Аватар (необязательно)',
+        'create.avatarDefault': 'Стандартное изображение',
+        'create.avatarPick': 'Выбрать фото',
+        'create.avatarReset': 'Сбросить фото',
         'create.error': 'Не удалось создать персону.',
+        'crop.title': 'Обрезка аватара',
+        'crop.hint': 'Перетащите рамку для кадрирования или выберите пропорции ниже.',
+        'crop.aspectLabel': 'Пропорции обрезки',
+        'crop.free': 'Свободно',
+        'crop.cardRatio': 'Текущие пропорции карточек',
+        'crop.apply': 'Применить',
         'settings.intro': 'Более красивый и удобный для мобильных способ управлять персонами.',
         'settings.open': 'Открыть Менеджер Персон',
         'settings.behaviorHeading': 'Поведение',
         'settings.hijack': 'Открывать менеджер вместо стандартной панели персон',
         'settings.hijackDesc': 'Нажатие на кнопку панели управления персонами открывает этот менеджер.',
+        'settings.cropOnUpload': 'Обрезать аватары при загрузке',
+        'settings.cropOnUploadDesc': 'Открывать окно обрезки перед сохранением нового изображения персоны.',
         'settings.displayHeading': 'Отображение',
         'settings.gridColumns': 'Карточек в ряду',
         'settings.gridColumnsDesc': 'Максимум на больших экранах; в узких областях столбцов меньше. На мобильных два столбца.',
@@ -452,10 +475,12 @@ const I18N = {
         'editor.expand': 'На весь экран',
         'editor.collapse': 'Свернуть',
         'editor.expandDesc': 'Развернуть редактор описания',
+        'editor.use': 'Выбрать',
+        'editor.active': 'Активна',
         'editor.rename': 'Переименовать персону',
         'editor.image': 'Сменить изображение',
         'editor.duplicate': 'Дублировать персону',
-        'editor.makeDefault': 'Сделать по умолчанию',
+        'editor.duplicateShort': 'Дублировать',
         'editor.delete': 'Удалить персону',
         'editor.title': 'Заголовок',
         'editor.description': 'Описание',
@@ -472,11 +497,12 @@ const I18N = {
         'editor.role.user': 'Пользователь',
         'editor.role.assistant': 'Ассистент',
         'editor.connections': 'Связи',
-        'editor.locksHint': 'Сначала выберите эту персону, чтобы менять её привязки.',
+        'editor.locksHint': 'Сначала выберите эту персону, чтобы менять привязки к чату или персонажу.',
         'editor.noConnections': 'Пока нет связей с персонажами.',
         'editor.lorebook': 'Лорбук',
         'editor.lorebook.none': 'Нет',
         'editor.openLorebook': 'Открыть лорбук',
+        'editor.folder': 'Папка',
         'editor.notes': 'Личные заметки',
         'editor.notesPlaceholder': 'Заметки видны только здесь и не отправляются модели.',
         'editor.renamePrompt': 'Введите новое имя для этой персоны:',
@@ -538,6 +564,8 @@ function getSettings() {
     for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) {
         if (!(k in s)) s[k] = structuredClone(v);
     }
+    s.hijackDrawer = Boolean(s.hijackDrawer);
+    s.cropOnUpload = Boolean(s.cropOnUpload);
     s.gridColumns = GRID_COLUMNS.includes(String(s.gridColumns)) ? String(s.gridColumns) : DEFAULT_SETTINGS.gridColumns;
     if (!ASPECT_RATIOS.includes(s.aspectRatio)) s.aspectRatio = DEFAULT_SETTINGS.aspectRatio;
     if (!PAGE_SIZES.includes(Number(s.pageSize))) s.pageSize = DEFAULT_SETTINGS.pageSize;
@@ -585,6 +613,13 @@ function bindSettingsUI() {
     $hijack.off('change.pm').on('change.pm', function () {
         s.hijackDrawer = $(this).prop('checked');
         if (s.hijackDrawer) hijackPersonaDrawer();
+        saveSettings();
+    });
+
+    const $crop = $('#pm_crop_on_upload');
+    $crop.prop('checked', !!s.cropOnUpload);
+    $crop.off('change.pm').on('change.pm', function () {
+        s.cropOnUpload = $(this).prop('checked');
         saveSettings();
     });
 
@@ -737,17 +772,21 @@ function renameFolder(folderId, name) {
 function countInFolder(folderId) {
     const list = state.avatars || [];
     if (folderId === FOLDER_ALL) return list.length;
-    const { favorites, assignments } = getSettings();
-    if (folderId === FOLDER_FAVORITES) {
-        const ids = new Set(favorites);
-        return list.filter((id) => ids.has(id)).length;
-    }
+    const { assignments } = getSettings();
     if (folderId === FOLDER_UNFILED) return list.filter((id) => !assignments[id]).length;
     return list.filter((id) => assignments[id] === folderId).length;
 }
 
 function hasFolders() {
     return getSettings().folders.length > 0;
+}
+
+function normalizeActiveFolder() {
+    const folder = state.activeFolderId;
+    if (folder === FOLDER_ALL || folder === FOLDER_UNFILED) return folder;
+    if (getSettings().folders.some((f) => f.id === folder)) return folder;
+    state.activeFolderId = FOLDER_ALL;
+    return FOLDER_ALL;
 }
 
 /** Sort by the avatar's leading timestamp, then stored firstSeen, then 0. */
@@ -771,10 +810,9 @@ function getVisiblePersonas() {
     let list = (state.avatars || []).map(personaMeta);
 
     // Folder filter (skipped while searching, so search spans the whole library).
-    const folder = state.activeFolderId;
-    if (!term && folder && folder !== FOLDER_ALL) {
-        if (folder === FOLDER_FAVORITES) list = list.filter((p) => favorites.has(p.id));
-        else if (folder === FOLDER_UNFILED) list = list.filter((p) => !assignments[p.id]);
+    const folder = normalizeActiveFolder();
+    if (!term && folder !== FOLDER_ALL) {
+        if (folder === FOLDER_UNFILED) list = list.filter((p) => !assignments[p.id]);
         else list = list.filter((p) => assignments[p.id] === folder);
     }
 
@@ -797,9 +835,6 @@ function getVisiblePersonas() {
             break;
         case 'favorites':
             list = list.filter((p) => favorites.has(p.id));
-            break;
-        case 'unsorted':
-            list = list.filter((p) => !assignments[p.id]);
             break;
     }
 
@@ -870,12 +905,27 @@ function applyGridLayout() {
  * Apply the chosen override theme to the modal. "native" removes the attribute
  * entirely so the SmartTheme-derived defaults remain untouched.
  */
-function applyTheme() {
-    const modal = state.dom.modal;
-    if (!modal) return;
+function applyThemeToElement(el) {
+    if (!el) return;
     const theme = getSettings().theme;
-    if (!theme || theme === 'native') delete modal.dataset.theme;
-    else modal.dataset.theme = theme;
+    if (!theme || theme === 'native') delete el.dataset.theme;
+    else el.dataset.theme = theme;
+}
+
+function applyTheme() {
+    applyThemeToElement(state.dom.modal);
+}
+
+function stylePopupDialog(dlg, extraClass = '') {
+    if (!dlg) return;
+    dlg.classList.add('pm-themed-popup');
+    if (extraClass) dlg.classList.add(extraClass);
+    applyThemeToElement(dlg);
+    dlg.addEventListener('keydown', (e) => {
+        if ((e.key === 'Enter' || e.key === ' ') && e.target instanceof Element && e.target.closest('button')) {
+            e.stopPropagation();
+        }
+    });
 }
 
 /**
@@ -930,10 +980,6 @@ function renderGrid({ resetScroll = false } = {}) {
     const start = (state.currentPage - 1) * state.pageSize;
     const pageItems = all.slice(start, start + state.pageSize);
 
-    const fid = state.activeFolderId;
-    const settings = getSettings();
-    const inRealFolder = settings.folders.some((folder) => folder.id === fid);
-
     const fragment = document.createDocumentFragment();
     for (const meta of pageItems) {
         const card = document.createElement('div');
@@ -963,17 +1009,15 @@ function renderGrid({ resetScroll = false } = {}) {
             </button>
             <div class="pm_card_meta">
                 <span class="pm_card_badges">${lockBadgesHtml(meta)}</span>
-                <button type="button" class="pm_card_fav ${fav ? 'is-on' : ''}" data-pm-fav="${escapeHtml(meta.id)}" title="${escapeHtml(t('action.favorite'))}" aria-label="${escapeHtml(t('card.favoriteFor', { name: meta.name }))}" aria-pressed="${fav}">
-                    <i class="fa-${fav ? 'solid' : 'regular'} fa-star" aria-hidden="true"></i>
-                </button>
-            </div>
-            <div class="pm_card_actions">
-                <button type="button" class="pm_card_action" data-pm-card="edit" title="${escapeHtml(t('card.edit'))}" aria-label="${escapeHtml(t('card.editFor', { name: meta.name }))}"><i class="fa-solid fa-pencil"></i></button>
-                <button type="button" class="pm_card_action" data-pm-card="move" title="${escapeHtml(t('card.move'))}" aria-label="${escapeHtml(t('card.moveFor', { name: meta.name }))}"><i class="fa-solid fa-folder-open"></i></button>
-                ${inRealFolder && settings.assignments[meta.id] === fid ? `<button type="button" class="pm_card_action" data-pm-card="remove" title="${escapeHtml(t('card.removeFromFolder'))}" aria-label="${escapeHtml(t('card.removeFor', { name: meta.name }))}"><i class="fa-solid fa-folder-minus"></i></button>` : ''}
-                <button type="button" class="pm_card_action pm_card_action_danger" data-pm-card="delete" title="${escapeHtml(t('card.delete'))}" aria-label="${escapeHtml(t('card.deleteFor', { name: meta.name }))}"><i class="fa-solid fa-trash-can"></i></button>
+                <div class="pm_card_quick">
+                    <button type="button" class="pm_card_icon_btn pm_card_fav ${fav ? 'is-on' : ''}" data-pm-fav="${escapeHtml(meta.id)}" title="${escapeHtml(t('action.favorite'))}" aria-label="${escapeHtml(t('card.favoriteFor', { name: meta.name }))}" aria-pressed="${fav}">
+                        <i class="fa-${fav ? 'solid' : 'regular'} fa-star" aria-hidden="true"></i>
+                    </button>
+                    <button type="button" class="pm_card_icon_btn pm_card_edit" data-pm-card="edit" title="${escapeHtml(t('card.edit'))}" aria-label="${escapeHtml(t('card.editFor', { name: meta.name }))}">
+                        <i class="fa-solid fa-pencil" aria-hidden="true"></i>
+                    </button>
+                </div>
             </div>`;
-        card.querySelectorAll('button i').forEach((icon) => icon.setAttribute('aria-hidden', 'true'));
         fragment.appendChild(card);
     }
     grid.replaceChildren(fragment);
@@ -1064,8 +1108,9 @@ function folderRowHtml(id, label, icon, { fixed = false } = {}) {
 }
 
 function renderSidebar() {
-    const el = state.dom.sidebar;
+    const el = state.dom.folderList;
     if (!el) return;
+    normalizeActiveFolder();
     const focused = el.contains(document.activeElement) ? document.activeElement : null;
     const focusedId = focused?.closest('[data-folder-id]')?.dataset.folderId;
     const focusSelector = focused?.hasAttribute('data-folder-rename') ? '[data-folder-rename]'
@@ -1073,13 +1118,11 @@ function renderSidebar() {
     const s = getSettings();
     const folders = [...s.folders].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
-    let html = `<div class="pm_folder_list">`;
+    let html = '';
     html += folderRowHtml(FOLDER_ALL, t('folder.all'), 'fa-layer-group', { fixed: true });
-    html += folderRowHtml(FOLDER_FAVORITES, t('folder.favorites'), 'fa-star', { fixed: true });
     html += folderRowHtml(FOLDER_UNFILED, t('folder.unfiled'), 'fa-inbox', { fixed: true });
     if (folders.length) html += `<div class="pm_folder_divider">${escapeHtml(t('folder.heading'))}</div>`;
     for (const f of folders) html += folderRowHtml(f.id, f.name, 'fa-folder');
-    html += `</div>`;
     el.innerHTML = html;
     el.querySelectorAll('button i').forEach((icon) => icon.setAttribute('aria-hidden', 'true'));
     if (focusedId) {
@@ -1088,10 +1131,30 @@ function renderSidebar() {
     }
 }
 
+function isSidebarOpen() {
+    return Boolean(state.dom.sidebar && !state.dom.sidebar.classList.contains('is-collapsed'));
+}
+
+function setSidebarOpen(open, { remember = false } = {}) {
+    const { sidebar, content, sidebarToggle } = state.dom;
+    if (!sidebar) return;
+    const restoreFocus = !open && sidebar.contains(document.activeElement);
+    sidebar.classList.toggle('is-collapsed', !open);
+    content?.classList.toggle('pm-sidebar-open', open);
+    sidebarToggle?.classList.toggle('is-active', open);
+    sidebarToggle?.setAttribute('aria-expanded', String(open));
+    sidebarToggle?.setAttribute('aria-pressed', String(open));
+    if (remember && !isMobileLayout()) state.sidebarPreference = open;
+    if (restoreFocus) sidebarToggle?.focus({ preventScroll: true });
+}
+
 function applyFolderLayout() {
-    const content = state.dom.content;
-    if (!content) return;
-    content.classList.toggle('has-folders', hasFolders());
+    if (!state.dom.sidebar) return;
+    if (!isMobileLayout()) {
+        setSidebarOpen(state.sidebarPreference ?? hasFolders());
+    } else {
+        setSidebarOpen(isSidebarOpen());
+    }
 }
 
 async function refresh() {
@@ -1354,6 +1417,279 @@ async function uploadAvatarBlob(avatarId, blob) {
         body: form,
     });
     if (!res.ok) throw new Error(`upload ${res.status}`);
+    const data = await res.json().catch(() => null);
+    return String(data?.path || avatarId);
+}
+
+// ── Avatar image decode & crop pipeline ───────────────────────────────────
+function withDecodedImage(blob, fn) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        const url = URL.createObjectURL(blob);
+        let settled = false;
+        const cleanup = () => {
+            clearTimeout(timer);
+            img.onload = img.onerror = null;
+            img.src = '';
+            URL.revokeObjectURL(url);
+        };
+        const fail = (err) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(err);
+        };
+        const timer = setTimeout(() => fail(new Error('Image decode timed out')), 20000);
+        img.onerror = () => fail(new Error('Failed to decode image'));
+        img.onload = () => {
+            if (settled) return;
+            settled = true;
+            try {
+                if (!img.naturalWidth || !img.naturalHeight) throw new Error('Empty image');
+                resolve(fn(img));
+            } catch (err) {
+                reject(err);
+            } finally {
+                cleanup();
+            }
+        };
+        try { img.src = url; } catch (err) { fail(err); }
+    });
+}
+
+function canvasToPngBlob(canvas) {
+    return new Promise((resolve, reject) => {
+        try {
+            canvas.toBlob((blob) => {
+                canvas.width = canvas.height = 0;
+                if (blob) resolve(blob);
+                else reject(new Error('Canvas export failed'));
+            }, 'image/png');
+        } catch (err) {
+            canvas.width = canvas.height = 0;
+            reject(err);
+        }
+    });
+}
+
+function rasterizeImageBlob(blob, maxDim, region = null) {
+    return withDecodedImage(blob, (img) => {
+        const nw = img.naturalWidth;
+        const nh = img.naturalHeight;
+        let sx = 0;
+        let sy = 0;
+        let sw = nw;
+        let sh = nh;
+        if (region) {
+            if (![region.x, region.y, region.width, region.height].every(Number.isFinite)
+                || region.width <= 0 || region.height <= 0) {
+                throw new Error('Invalid crop region');
+            }
+            sx = Math.max(0, Math.min(nw - 1, region.x * nw));
+            sy = Math.max(0, Math.min(nh - 1, region.y * nh));
+            sw = Math.max(1, Math.min(nw - sx, region.width * nw));
+            sh = Math.max(1, Math.min(nh - sy, region.height * nh));
+        }
+        const scale = maxDim > 0 ? Math.min(1, maxDim / Math.max(sw, sh)) : 1;
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(sw * scale));
+        canvas.height = Math.max(1, Math.round(sh * scale));
+        try {
+            canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+        } catch (err) {
+            canvas.width = canvas.height = 0;
+            throw err;
+        }
+        return canvasToPngBlob(canvas);
+    });
+}
+
+/**
+ * Open a themed Cropper.js dialog for `file` and render the cropped region from
+ * the original file to a bounded PNG Blob. Returns `null` on cancel.
+ */
+async function cropAvatarFile(file) {
+    const previewDataUrl = await withDecodedImage(file, (img) => {
+        const scale = Math.min(1, CROP_PREVIEW_DIM / Math.max(img.naturalWidth, img.naturalHeight));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+        try {
+            canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+            return canvas.toDataURL('image/png');
+        } finally {
+            canvas.width = canvas.height = 0;
+        }
+    });
+
+    const ctx = getContext();
+    const cardRatioId = getSettings().aspectRatio;
+    const defaultPreset = CROP_PRESETS.find((p) => p.id === cardRatioId) || CROP_PRESETS[0];
+
+    const shell = document.createElement('div');
+    shell.className = 'pm_crop_shell';
+    const head = document.createElement('div');
+    head.className = 'pm_crop_head';
+    const titleEl = document.createElement('h3');
+    titleEl.className = 'pm_crop_title';
+    titleEl.textContent = t('crop.title');
+    const hintEl = document.createElement('p');
+    hintEl.className = 'pm_crop_hint';
+    hintEl.textContent = t('crop.hint');
+    head.append(titleEl, hintEl);
+
+    const stage = document.createElement('div');
+    stage.className = 'pm_crop_stage';
+
+    const ratioBar = document.createElement('div');
+    ratioBar.className = 'pm_crop_ratios';
+    ratioBar.setAttribute('role', 'group');
+    ratioBar.setAttribute('aria-label', t('crop.aspectLabel'));
+    const ratioButtons = CROP_PRESETS.map((preset) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'pm_crop_ratio interactable';
+        btn.dataset.cropPreset = preset.id;
+        const isDefault = preset.id === defaultPreset.id;
+        btn.classList.toggle('is-active', isDefault);
+        if (preset.id === cardRatioId) {
+            btn.classList.add('is-card-ratio');
+            btn.title = t('crop.cardRatio');
+        }
+        btn.setAttribute('aria-pressed', String(isDefault));
+        btn.textContent = preset.labelKey ? t(preset.labelKey) : preset.label;
+        ratioBar.appendChild(btn);
+        return btn;
+    });
+
+    shell.append(head, stage, ratioBar);
+
+    const popup = new ctx.Popup(shell, ctx.POPUP_TYPE?.CROP ?? 3, '', {
+        cropImage: previewDataUrl,
+        cropAspect: defaultPreset.ratio,
+        okButton: t('crop.apply'),
+        cancelButton: t('select.cancel'),
+    });
+    stylePopupDialog(popup.dlg, 'pm-crop-popup');
+    popup.dlg.setAttribute('aria-label', t('crop.title'));
+    stage.appendChild(popup.cropWrap);
+
+    const cropper = $(popup.cropImage).data('cropper');
+    const origGetCroppedCanvas = cropper?.getCroppedCanvas;
+    if (!cropper || !origGetCroppedCanvas) {
+        popup.dlg?.remove();
+        const popups = ctx.Popup.util?.popups;
+        const idx = popups?.indexOf(popup) ?? -1;
+        if (idx >= 0) popups.splice(idx, 1);
+        throw new Error('Cropper unavailable');
+    }
+
+    const image = cropper.image;
+    let sizingImage = null;
+    let finished = false;
+    let applying = false;
+    let exportedBlob = null;
+    let rejectFailure;
+    const failure = new Promise((_, reject) => { rejectFailure = reject; });
+    const fail = (err) => {
+        if (finished) return;
+        finished = true;
+        popup.okButton?.setAttribute('aria-disabled', 'true');
+        if (popup.dlg?.open) popup.dlg.close();
+        popup.dlg?.remove();
+        const popups = ctx.Popup.util?.popups;
+        const idx = popups?.indexOf(popup) ?? -1;
+        if (idx >= 0) popups.splice(idx, 1);
+        rejectFailure(err instanceof Error ? err : new Error('Crop failed'));
+    };
+
+    const syncReady = () => {
+        if (finished) return;
+        const ready = !applying && Boolean(cropper?.ready);
+        popup.okButton?.setAttribute('aria-disabled', String(!ready));
+        for (const btn of ratioButtons) btn.disabled = !ready;
+    };
+
+    ratioBar.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-crop-preset]');
+        if (!btn || btn.disabled || !cropper?.ready) return;
+        const preset = CROP_PRESETS.find((p) => p.id === btn.dataset.cropPreset);
+        if (!preset) return;
+        cropper.setAspectRatio(preset.ratio);
+        for (const el of ratioButtons) {
+            const on = el === btn;
+            el.classList.toggle('is-active', on);
+            el.setAttribute('aria-pressed', String(on));
+        }
+    });
+
+    const stubCanvas = { toDataURL: () => 'data:image/png;base64,' };
+    const origComplete = popup.complete;
+    popup.complete = async (result) => {
+        const affirmative = result >= (ctx.POPUP_RESULT?.AFFIRMATIVE ?? 1);
+        if (finished || (affirmative && (applying || !cropper?.ready))) return undefined;
+        try {
+            if (affirmative) {
+                applying = true;
+                syncReady();
+                const crop = cropper.getData();
+                const { naturalWidth, naturalHeight } = cropper.getImageData();
+                if (!naturalWidth || !naturalHeight) throw new Error('Invalid crop source');
+                exportedBlob = await rasterizeImageBlob(file, AVATAR_EXPORT_DIM, {
+                    x: crop.x / naturalWidth,
+                    y: crop.y / naturalHeight,
+                    width: crop.width / naturalWidth,
+                    height: crop.height / naturalHeight,
+                });
+                if (finished) return undefined;
+                cropper.getCroppedCanvas = () => stubCanvas;
+            }
+            finished = true;
+            return await origComplete.call(popup, result);
+        } catch (err) {
+            if (!finished) fail(err);
+            return undefined;
+        } finally {
+            applying = false;
+            syncReady();
+        }
+    };
+
+    const onLoad = () => {
+        sizingImage?.removeEventListener('error', fail);
+        sizingImage = cropper?.sizingImage;
+        sizingImage?.addEventListener('error', fail);
+    };
+    popup.onOpen = () => {
+        if (!finished && cropper?.ready) cropper.resize();
+    };
+    popup.cropImage.addEventListener('ready', syncReady);
+    popup.dlg.addEventListener('error', fail, true);
+    image?.addEventListener('load', onLoad);
+    syncReady();
+    onLoad();
+
+    try {
+        const result = await Promise.race([popup.show(), failure]);
+        if (result == null) return null;
+        if (!exportedBlob) throw new Error('Missing cropped image');
+        return exportedBlob;
+    } finally {
+        finished = true;
+        popup.onOpen = null;
+        popup.cropImage.removeEventListener('ready', syncReady);
+        popup.dlg.removeEventListener('error', fail, true);
+        image?.removeEventListener('load', onLoad);
+        sizingImage?.removeEventListener('error', fail);
+        if (cropper && origGetCroppedCanvas) cropper.getCroppedCanvas = origGetCroppedCanvas;
+        cropper?.destroy();
+    }
+}
+
+async function prepareAvatarUploadBlob(file) {
+    if (!file) return null;
+    if (getSettings().cropOnUpload) return cropAvatarFile(file);
+    return rasterizeImageBlob(file, AVATAR_EXPORT_DIM);
 }
 
 async function onRestoreFile(file) {
@@ -1421,9 +1757,8 @@ async function onRestoreFile(file) {
 
 // ── Create persona ────────────────────────────────────────────────────────
 /**
- * Create a blank persona: prompt for name (+ optional title), mint an avatar id,
- * seed its descriptor, upload the default avatar image, then open the editor.
- * Mirrors native createDummyPersona but stays inside our modal/editor flow.
+ * Create a persona: prompt for name (+ optional title + optional avatar with
+ * crop/preview), mint an avatar id, upload the avatar, and open the editor.
  */
 async function onCreate() {
     if (state.busy) return;
@@ -1433,26 +1768,128 @@ async function onCreate() {
 
     const popup = new ctx.Popup(t('create.namePrompt'), ctx.POPUP_TYPE?.INPUT ?? 4, '', {
         customInputs: [{ id: 'persona_title', type: 'text', label: t('create.nameLabel') }],
+        okButton: t('create.btn'),
+        cancelButton: t('select.cancel'),
     });
-    const name = await popup.show();
+    stylePopupDialog(popup.dlg);
+
+    const defaultAvatarSrc = default_user_avatar ? `/${default_user_avatar}` : FALLBACK_AVATAR_URL;
+    let pickedBlob = null;
+    let previewUrl = '';
+    let pickingImage = false;
+    const revokePreview = () => {
+        if (previewUrl) {
+            URL.revokeObjectURL(previewUrl);
+            previewUrl = '';
+        }
+    };
+
+    const avatarRow = document.createElement('div');
+    avatarRow.className = 'pm-create-avatar-row';
+    const previewWrap = document.createElement('div');
+    previewWrap.className = 'pm-create-avatar-thumb';
+    const previewImg = document.createElement('img');
+    previewImg.src = defaultAvatarSrc;
+    previewImg.alt = '';
+    previewImg.onerror = function () { this.onerror = null; this.src = FALLBACK_AVATAR_URL; };
+    previewWrap.appendChild(previewImg);
+
+    const metaWrap = document.createElement('div');
+    metaWrap.className = 'pm-create-avatar-meta';
+    const rowLabel = document.createElement('span');
+    rowLabel.className = 'pm-create-avatar-label';
+    rowLabel.textContent = t('create.avatarLabel');
+    const rowState = document.createElement('span');
+    rowState.className = 'pm-create-avatar-state';
+    rowState.textContent = t('create.avatarDefault');
+    metaWrap.append(rowLabel, rowState);
+
+    const actionsWrap = document.createElement('div');
+    actionsWrap.className = 'pm-create-avatar-actions';
+    const pickBtn = document.createElement('button');
+    pickBtn.type = 'button';
+    pickBtn.className = 'menu_button interactable pm-create-avatar-pick';
+    pickBtn.textContent = t('create.avatarPick');
+    const resetBtn = document.createElement('button');
+    resetBtn.type = 'button';
+    resetBtn.className = 'menu_button menu_button_icon interactable pm-create-avatar-reset';
+    resetBtn.title = t('create.avatarReset');
+    resetBtn.setAttribute('aria-label', t('create.avatarReset'));
+    resetBtn.hidden = true;
+    resetBtn.innerHTML = '<i class="fa-solid fa-rotate-left" aria-hidden="true"></i>';
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*';
+    fileInput.hidden = true;
+    actionsWrap.append(pickBtn, resetBtn, fileInput);
+    avatarRow.append(previewWrap, metaWrap, actionsWrap);
+    popup.inputControls?.appendChild(avatarRow);
+
+    pickBtn.addEventListener('click', () => {
+        if (!pickingImage) fileInput.click();
+    });
+    resetBtn.addEventListener('click', () => {
+        pickedBlob = null;
+        revokePreview();
+        previewImg.src = defaultAvatarSrc;
+        rowState.textContent = t('create.avatarDefault');
+        resetBtn.hidden = true;
+    });
+    fileInput.addEventListener('change', async () => {
+        const file = fileInput.files?.[0];
+        fileInput.value = '';
+        if (!file || pickingImage) return;
+        pickingImage = true;
+        pickBtn.disabled = true;
+        try {
+            const blob = await prepareAvatarUploadBlob(file);
+            if (!blob || !popup.dlg?.isConnected) return;
+            pickedBlob = blob;
+            revokePreview();
+            previewUrl = URL.createObjectURL(blob);
+            previewImg.src = previewUrl;
+            rowState.textContent = file.name || t('create.avatarPick');
+            resetBtn.hidden = false;
+        } catch (err) {
+            warn('create-avatar', err);
+            toastr.error(t('editor.imageError'));
+        } finally {
+            pickingImage = false;
+            pickBtn.disabled = false;
+            if (popup.dlg?.open) pickBtn.focus({ preventScroll: true });
+        }
+    });
+
+    let name;
+    try {
+        name = await popup.show();
+    } finally {
+        revokePreview();
+    }
     if (!name || typeof name !== 'string' || !name.trim() || !state.isOpen || generation !== state.openGeneration) return;
+    const trimmedName = name.trim();
     const title = String(popup.inputResults?.get('persona_title') || '').trim();
 
-    const newId = `${Date.now()}-${name.trim().replace(/[^a-zA-Z0-9]/g, '')}.png`;
+    const newId = `${Date.now()}-${trimmedName.replace(/[^a-zA-Z0-9]/g, '')}.png`;
     try {
         state.busy = true;
-        power_user.personas[newId] = name.trim();
+        power_user.personas[newId] = trimmedName;
         power_user.persona_descriptions[newId] = {
             description: '', position: POS.IN_PROMPT, depth: DEFAULT_DEPTH, role: DEFAULT_ROLE,
             lorebook: '', title, connections: [],
         };
-        const blob = await (await fetch(`/${default_user_avatar}`)).blob();
+        const blob = pickedBlob || await (await fetch(defaultAvatarSrc)).blob();
         await uploadAvatarBlob(newId, blob);
+        const s = getSettings();
+        if (s.folders.some((f) => f.id === state.activeFolderId)) {
+            s.assignments[newId] = state.activeFolderId;
+        }
         saveSettings();
         ctx.saveSettingsDebounced();
-        await eventSource.emit(event_types.PERSONA_CREATED, { avatarId: newId, name: name.trim(), description: '', title });
+        await eventSource.emit(event_types.PERSONA_CREATED, { avatarId: newId, name: trimmedName, description: '', title });
         if (state.isOpen && generation === state.openGeneration && state.editorId === editorId) openEditor(newId);
-    } catch (_) {
+    } catch (err) {
+        warn('create', err);
         delete power_user.personas[newId];
         delete power_user.persona_descriptions[newId];
         toastr.error(t('create.error'));
@@ -1493,6 +1930,7 @@ async function onConvert() {
         okButton: t('convert.btn'),
         cancelButton: t('select.cancel'),
     });
+    stylePopupDialog(instance.dlg);
     const result = await instance.show();
     const affirmative = ctx.POPUP_RESULT?.AFFIRMATIVE ?? 1;
     if (result !== affirmative && result !== true) return;
@@ -1503,46 +1941,15 @@ async function onConvert() {
     try {
         // convertCharacterToPersona emits PERSONA_CREATED, which reloads the list.
         await convertCharacterToPersona(index);
-    } catch (_) {
+    } catch (err) {
+        warn('convert', err);
         toastr.error(t('convert.error'));
     }
 }
 
 // ── Per-card actions ──────────────────────────────────────────────────────
-async function onCardAction(action, avatarId) {
-    switch (action) {
-        case 'edit':
-            openEditor(avatarId);
-            break;
-        case 'move': {
-            const folderId = await pickFolder();
-            if (folderId === undefined) return;
-            assignToFolder(avatarId, folderId);
-            renderSidebar();
-            renderGrid();
-            break;
-        }
-        case 'remove': {
-            const s = getSettings();
-            if (!s.folders.some((folder) => folder.id === state.activeFolderId)
-                || s.assignments[avatarId] !== state.activeFolderId) return;
-            assignToFolder(avatarId, FOLDER_UNFILED);
-            renderSidebar();
-            renderGrid();
-            break;
-        }
-        case 'delete': {
-            const ctx = getContext();
-            const name = power_user.personas?.[avatarId] || '';
-            const ok = await ctx.Popup.show.confirm(t('card.delete'), t('card.deleteConfirm', { name }));
-            if (!ok) return;
-            if (!(await deletePersonaViaNative(avatarId))) {
-                toastr.error(t('card.deleteError'));
-                return;
-            }
-            break;
-        }
-    }
+function onCardAction(action, avatarId) {
+    if (action === 'edit') openEditor(avatarId);
 }
 
 // ── Editor (master-detail, 3rd column) ────────────────────────────────────
@@ -1707,6 +2114,19 @@ function renderConnectionList(obj) {
         </span>`).join('');
 }
 
+function renderEditorFolderSelect(avatarId = state.editorId) {
+    const sel = state.dom.fFolder;
+    if (!sel || !avatarId) return;
+    const s = getSettings();
+    sel.innerHTML = '';
+    sel.appendChild(new Option(t('folder.unfiled'), FOLDER_UNFILED));
+    [...s.folders]
+        .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
+        .forEach((f) => sel.appendChild(new Option(f.name, f.id)));
+    const assigned = s.assignments[avatarId];
+    sel.value = assigned && s.folders.some((f) => f.id === assigned) ? assigned : FOLDER_UNFILED;
+}
+
 function renderEditor() {
     const id = state.editorId;
     if (!id || !state.dom.editor) return;
@@ -1719,7 +2139,19 @@ function renderEditor() {
     state.dom.editorImg.src = personaImageUrl(id);
     state.dom.editorImg.onerror = function () { this.onerror = null; this.src = FALLBACK_AVATAR_URL; };
     state.dom.editorName.textContent = meta.name;
+    state.dom.editorRename?.setAttribute('aria-label', `${t('editor.rename')}: ${meta.name}`);
     state.dom.editorSubtitle.textContent = meta.title || '';
+    state.dom.editorSubtitle.hidden = !meta.title;
+
+    if (state.dom.editorUse) {
+        state.dom.editorUse.classList.toggle('is-active', isActive);
+        state.dom.editorUse.setAttribute('aria-pressed', String(isActive));
+        const icon = state.dom.editorUse.querySelector('i');
+        if (icon) icon.className = isActive ? 'fa-solid fa-circle-check' : 'fa-solid fa-check';
+    }
+    if (state.dom.editorUseLabel) {
+        state.dom.editorUseLabel.textContent = t(isActive ? 'editor.active' : 'editor.use');
+    }
 
     state.dom.fTitle.value = meta.title || '';
     state.dom.fDesc.value = obj.description || '';
@@ -1735,16 +2167,16 @@ function renderEditor() {
     for (const w of (world_names || [])) sel.appendChild(new Option(w, w));
     sel.value = obj.lorebook || '';
 
-    state.dom.opDefault.classList.toggle('is-on', power_user.default_persona === id);
-    state.dom.opDefault.setAttribute('aria-pressed', String(power_user.default_persona === id));
+    renderEditorFolderSelect(id);
 
-    // Locks: only meaningful for the active persona.
-    state.dom.connLocks.classList.toggle('is-disabled', !isActive);
+    // Default applies to the edited persona; chat/character locks require active persona.
     state.dom.connHint.classList.toggle('pm_hidden', isActive);
     state.dom.connLocks.querySelectorAll('[data-pm-lock]').forEach((btn) => {
         const type = btn.getAttribute('data-pm-lock');
-        const on = isActive && isPersonaLocked(type);
-        btn.disabled = !isActive;
+        const isDefaultLock = type === 'default';
+        const enabled = isDefaultLock || isActive;
+        const on = isDefaultLock ? power_user.default_persona === id : (isActive && isPersonaLocked(type));
+        btn.disabled = !enabled;
         btn.classList.toggle('is-on', on);
         btn.setAttribute('aria-pressed', String(on));
     });
@@ -1756,21 +2188,12 @@ function renderEditor() {
 
 async function onEditorImagePicked(file) {
     const id = state.editorId;
-    if (!id || !file) return;
-    const ctx = getContext();
+    if (!id || !file || state.busy) return;
+    const generation = state.openGeneration;
     try {
-        const form = new FormData();
-        form.append('avatar', file, 'avatar.png');
-        form.append('overwrite_name', id);
-        const res = await fetch('/api/avatars/upload', {
-            method: 'POST',
-            headers: ctx.getRequestHeaders({ omitContentType: true }),
-            cache: 'no-cache',
-            body: form,
-        });
-        if (!res.ok) throw new Error(`upload ${res.status}`);
-        const data = await res.json();
-        const uploadedId = String(data?.path || id);
+        const blob = await prepareAvatarUploadBlob(file);
+        if (!blob || !state.isOpen || generation !== state.openGeneration || !power_user.personas?.[id]) return;
+        const uploadedId = await uploadAvatarBlob(id, blob);
         const fullUrl = `/${getUserAvatar(uploadedId).split('/').map(encodeURIComponent).join('/')}`;
         await Promise.allSettled([
             fetch(fullUrl, { cache: 'reload' }),
@@ -1778,7 +2201,8 @@ async function onEditorImagePicked(file) {
         ]);
         state.imageRevisions.set(id, Date.now());
         refreshVisibleAvatarImages(id);
-    } catch (_) {
+    } catch (err) {
+        warn('avatar', err);
         toastr.error(t('editor.imageError'));
     }
 }
@@ -1798,7 +2222,7 @@ function refreshVisibleAvatarImages(avatarId) {
 
 async function onEditorDuplicate() {
     const id = state.editorId;
-    if (!id) return;
+    if (!id || state.busy) return;
     const generation = state.openGeneration;
     const ctx = getContext();
     const name = power_user.personas[id] || '';
@@ -1818,21 +2242,15 @@ async function onEditorDuplicate() {
             connections: [],
         };
         const blob = await (await fetch(`/${getUserAvatar(id).split('/').map(encodeURIComponent).join('/')}`)).blob();
-        const form = new FormData();
-        form.append('avatar', blob, 'avatar.png');
-        form.append('overwrite_name', newId);
-        const res = await fetch('/api/avatars/upload', {
-            method: 'POST',
-            headers: ctx.getRequestHeaders({ omitContentType: true }),
-            cache: 'no-cache',
-            body: form,
-        });
-        if (!res.ok) throw new Error(`upload ${res.status}`);
+        await uploadAvatarBlob(newId, blob);
+        const s = getSettings();
+        if (s.assignments[id]) s.assignments[newId] = s.assignments[id];
         saveSettings();
         ctx.saveSettingsDebounced();
         await eventSource.emit(event_types.PERSONA_CREATED, { avatarId: newId, name, description: src.description ?? '', title: src.title ?? '' });
         if (state.isOpen && generation === state.openGeneration && state.editorId === id) openEditor(newId);
-    } catch (_) {
+    } catch (err) {
+        warn('duplicate', err);
         delete power_user.personas[newId];
         delete power_user.persona_descriptions[newId];
         toastr.error(t('editor.duplicateError'));
@@ -1896,6 +2314,13 @@ function bindEditorEvents() {
     d.editorClose?.addEventListener('click', closeEditor);
     d.editorBack?.addEventListener('click', closeEditor);
     d.editorExpand?.addEventListener('click', () => setEditorMaximized(!state.editorMaximized));
+    d.editorAvatarBtn?.addEventListener('click', () => {
+        if (!state.busy) d.imageInput?.click();
+    });
+    d.editorRename?.addEventListener('click', onEditorRename);
+    d.editorUse?.addEventListener('click', () => {
+        if (state.editorId) selectPersona(state.editorId);
+    });
 
     d.fTitle?.addEventListener('input', () => {
         const id = state.editorId; if (!id) return;
@@ -1903,6 +2328,7 @@ function bindEditorEvents() {
         if (obj.title === d.fTitle.value) return;
         obj.title = d.fTitle.value;
         d.editorSubtitle.textContent = obj.title;
+        d.editorSubtitle.hidden = !obj.title;
         setSaveStatus('editor.saving');
         clearTimeout(titleTimer);
         titleTimer = setTimeout(() => commitDescriptor(id, obj), 250);
@@ -1981,6 +2407,14 @@ function bindEditorEvents() {
         if (name) openWorldInfoEditor(name);
     });
 
+    d.fFolder?.addEventListener('change', () => {
+        const id = state.editorId; if (!id) return;
+        assignToFolder(id, d.fFolder.value);
+        flushSave();
+        renderSidebar();
+        renderGrid();
+    });
+
     d.fNotes?.addEventListener('input', () => {
         const id = state.editorId; if (!id) return;
         const s = getSettings();
@@ -1991,19 +2425,17 @@ function bindEditorEvents() {
     });
     d.fNotes?.addEventListener('blur', flushSave);
 
-    // Connection locks (active persona only).
     d.connLocks?.addEventListener('click', (e) => {
         const btn = e.target.closest('[data-pm-lock]');
         if (!btn || btn.disabled) return;
         e.stopPropagation();
-        toggleLock(btn.getAttribute('data-pm-lock'));
+        const type = btn.getAttribute('data-pm-lock');
+        if (type === 'default') onEditorSetDefault();
+        else toggleLock(type);
     });
 
-    d.opRename?.addEventListener('click', onEditorRename);
     d.opDuplicate?.addEventListener('click', onEditorDuplicate);
-    d.opDefault?.addEventListener('click', onEditorSetDefault);
     d.opDelete?.addEventListener('click', onEditorDelete);
-    d.opImage?.addEventListener('click', () => d.imageInput?.click());
     d.imageInput?.addEventListener('change', () => {
         const file = d.imageInput.files?.[0];
         d.imageInput.value = '';
@@ -2084,6 +2516,7 @@ async function bulkMove() {
     for (const id of ids) assignToFolder(id, folderId);
     setSelectMode(false);
     renderSidebar();
+    if (state.editorId) renderEditorFolderSelect(state.editorId);
 }
 
 function bulkFavorite() {
@@ -2136,6 +2569,7 @@ async function pickFolder() {
         okButton: t('select.move'),
         cancelButton: t('select.cancel'),
     });
+    stylePopupDialog(instance.dlg);
     const result = await instance.show();
     const affirmative = ctx.POPUP_RESULT?.AFFIRMATIVE ?? 1;
     if (result !== affirmative && result !== true) return undefined;
@@ -2149,8 +2583,11 @@ async function onNewFolder() {
     const folder = createFolder(name);
     state.activeFolderId = folder.id;
     state.currentPage = 1;
+    if (!isMobileLayout()) state.sidebarPreference = true;
     applyFolderLayout();
+    if (isMobileLayout()) setSidebarOpen(false);
     renderSidebar();
+    if (state.editorId) renderEditorFolderSelect(state.editorId);
     renderGrid({ resetScroll: true });
 }
 
@@ -2162,6 +2599,7 @@ async function onRenameFolder(folderId) {
     if (!name || !name.trim()) return;
     renameFolder(folderId, name);
     renderSidebar();
+    if (state.editorId) renderEditorFolderSelect(state.editorId);
 }
 
 async function onDeleteFolder(folderId) {
@@ -2173,6 +2611,7 @@ async function onDeleteFolder(folderId) {
     deleteFolder(folderId);
     applyFolderLayout();
     renderSidebar();
+    if (state.editorId) renderEditorFolderSelect(state.editorId);
     renderGrid();
 }
 
@@ -2217,9 +2656,7 @@ function bindDragAndDrop() {
         if (!row || !state.dragId) return;
         e.preventDefault();
         const target = row.getAttribute('data-folder-id');
-        if (target === FOLDER_FAVORITES) {
-            if (!isFavorite(state.dragId)) toggleFavorite(state.dragId);
-        } else if (target === FOLDER_ALL || target === FOLDER_UNFILED) {
+        if (target === FOLDER_ALL || target === FOLDER_UNFILED) {
             assignToFolder(state.dragId, FOLDER_UNFILED);
         } else {
             assignToFolder(state.dragId, target);
@@ -2227,6 +2664,7 @@ function bindDragAndDrop() {
         row.classList.remove('is-drop-target');
         state.dragId = null;
         renderSidebar();
+        if (state.editorId) renderEditorFolderSelect(state.editorId);
         renderGrid();
     });
 }
@@ -2252,6 +2690,7 @@ async function createManagerDom() {
         modal,
         content: modal.querySelector('#pm_content'),
         sidebar: modal.querySelector('#pm_sidebar'),
+        folderList: modal.querySelector('#pm_folder_list'),
         sidebarToggle: modal.querySelector('#pm_sidebar_toggle'),
         spotlight: modal.querySelector('#pm_spotlight'),
         search: modal.querySelector('#pm_search'),
@@ -2289,9 +2728,13 @@ async function createManagerDom() {
         progressPct: modal.querySelector('#pm_progress_pct'),
         progressLabel: modal.querySelector('#pm_progress_label'),
         editor: modal.querySelector('#pm_editor'),
+        editorAvatarBtn: modal.querySelector('#pm_editor_avatar_btn'),
         editorImg: modal.querySelector('#pm_editor_img'),
+        editorRename: modal.querySelector('#pm_editor_rename'),
         editorName: modal.querySelector('#pm_editor_name'),
         editorSubtitle: modal.querySelector('#pm_editor_subtitle'),
+        editorUse: modal.querySelector('#pm_editor_use'),
+        editorUseLabel: modal.querySelector('#pm_editor_use_label'),
         editorBack: modal.querySelector('#pm_editor_back'),
         editorExpand: modal.querySelector('#pm_editor_expand'),
         editorClose: modal.querySelector('#pm_editor_close'),
@@ -2302,6 +2745,7 @@ async function createManagerDom() {
         fDepth: modal.querySelector('#pm_field_depth'),
         fRole: modal.querySelector('#pm_field_role'),
         fLorebook: modal.querySelector('#pm_field_lorebook'),
+        fFolder: modal.querySelector('#pm_field_folder'),
         fNotes: modal.querySelector('#pm_field_notes'),
         loreOpen: modal.querySelector('#pm_lore_open'),
         tokenNum: modal.querySelector('#pm_token_num'),
@@ -2309,10 +2753,7 @@ async function createManagerDom() {
         connLocks: modal.querySelector('#pm_conn_locks'),
         connHint: modal.querySelector('#pm_conn_hint'),
         connList: modal.querySelector('#pm_conn_list'),
-        opRename: modal.querySelector('#pm_op_rename'),
-        opImage: modal.querySelector('#pm_op_image'),
         opDuplicate: modal.querySelector('#pm_op_duplicate'),
-        opDefault: modal.querySelector('#pm_op_default'),
         opDelete: modal.querySelector('#pm_op_delete'),
         imageInput: modal.querySelector('#pm_image_input'),
     };
@@ -2327,9 +2768,12 @@ function bindModalEvents() {
     if (!modal) return;
 
     modal.addEventListener('click', (e) => {
-        // Any click outside the theme menu/button closes the palette popover.
+        // Any click outside open popovers or the mobile folder overlay closes them.
         if (isThemeMenuOpen() && !e.target.closest('#pm_theme_btn')) closeThemeMenu();
         if (isMoreMenuOpen() && !e.target.closest('.pm_more_wrap')) closeMoreMenu();
+        if (isMobileLayout() && isSidebarOpen() && !e.target.closest('#pm_sidebar, #pm_sidebar_toggle')) {
+            setSidebarOpen(false);
+        }
 
         const action = e.target.closest('[data-pm-action]')?.getAttribute('data-pm-action');
         if (action === 'close') { if (!state.busy) closeManager(); return; }
@@ -2367,11 +2811,7 @@ function bindModalEvents() {
             state.currentPage = 1;
             renderSidebar();
             renderGrid({ resetScroll: true });
-            if (isMobileLayout()) {
-                dom.sidebar.classList.add('is-collapsed');
-                dom.sidebarToggle?.setAttribute('aria-expanded', 'false');
-                dom.sidebarToggle?.focus({ preventScroll: true });
-            }
+            if (isMobileLayout()) setSidebarOpen(false);
             return;
         }
 
@@ -2439,8 +2879,7 @@ function bindModalEvents() {
     bindDragAndDrop();
 
     dom.sidebarToggle?.addEventListener('click', () => {
-        const collapsed = dom.sidebar.classList.toggle('is-collapsed');
-        dom.sidebarToggle.setAttribute('aria-expanded', String(!collapsed));
+        setSidebarOpen(!isSidebarOpen(), { remember: true });
     });
 
     const applySearch = () => {
@@ -2483,9 +2922,8 @@ function onGlobalKeydown(e) {
     if (e.key === 'Tab') {
         const openDialog = document.querySelector('dialog.popup[open], dialog[open]');
         if (openDialog && !state.dom.modal?.contains(openDialog)) return;
-        const mobileLayout = isMobileLayout();
         const focusable = [...state.dom.modal.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
-            .filter((el) => el.offsetParent !== null && !el.closest('[inert]') && !(mobileLayout && el.closest('.pm_sidebar.is-collapsed')));
+            .filter((el) => el.offsetParent !== null && !el.closest('[inert]') && !el.closest('.pm_sidebar.is-collapsed'));
         if (!focusable.length) {
             e.preventDefault();
             state.dom.modal.focus({ preventScroll: true });
@@ -2512,6 +2950,7 @@ function onGlobalKeydown(e) {
     if (state.busy) return; // backup/restore in progress
     if (isThemeMenuOpen()) { closeThemeMenu(); return; }
     if (isMoreMenuOpen()) { closeMoreMenu(); return; }
+    if (isMobileLayout() && isSidebarOpen()) { setSidebarOpen(false); return; }
     if (state.editorId && isMobileLayout()) { closeEditor(); return; }
     if (state.editorMaximized) { setEditorMaximized(false); return; }
     if (state.editorId) { closeEditor(); return; }
@@ -2552,6 +2991,7 @@ function closeManager() {
     if (state.dom.modal) {
         closeThemeMenu();
         closeMoreMenu();
+        if (isMobileLayout()) setSidebarOpen(false);
         closeEditor();
         state.dom.modal.classList.remove('pm_selecting');
         updateSelectUI();
@@ -2672,7 +3112,12 @@ function wireEvents() {
 
 function initResponsiveEditor() {
     MOBILE_LAYOUT_MEDIA.addEventListener('change', (event) => {
-        if (event.matches && state.editorId) setEditorMaximized(true);
+        if (event.matches) {
+            setSidebarOpen(false);
+            if (state.editorId) setEditorMaximized(true);
+        } else if (state.isOpen) {
+            applyFolderLayout();
+        }
     });
 }
 
